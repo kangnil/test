@@ -241,6 +241,8 @@ class Humanoid(BaseTask):
 
         if self.viewer != None or flags.server_mode:
             self._init_camera()
+        else:
+            self._init_camera_headless()
 
 
     def load_humanoid_configs(self, cfg):

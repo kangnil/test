@@ -55,6 +55,23 @@ class AMPBuilder(network_builder.A2CBuilder):
 
             return output
 
+        def sample_text_embeddings(self, n, text_embeddings, weights):
+            device = next(self.critic_mlp.parameters()).device
+            if not hasattr(self, "all_norm_latents"):
+                self.all_text_embeddings = text_embeddings
+
+            if self.all_text_embeddings.device != device:
+                self.all_text_embeddings = self.all_norm_latents.to(device)
+
+            if not hasattr(self, "text_weights"):
+                self.text_weights = weights
+
+            z_text_idx = torch.multinomial(self.text_weights, num_samples=n, replacement=True)
+            z = self.all_text_embeddings[z_text_idx, :]
+            # z = torch.normal(mean=z, std=0.0)
+            z = torch.nn.functional.normalize(z, dim=-1)
+            return z, z_text_idx
+
         def eval_actor(self, obs_dict):
             # RNN is built with Batch-first enabled. 
             obs = obs_dict['obs']

@@ -5,7 +5,7 @@ from rl_games.common import schedulers
 from rl_games.common import vecenv
 
 from isaacgym.torch_utils import *
-
+import wandb
 import time
 from datetime import datetime
 import numpy as np
@@ -16,13 +16,15 @@ from phc.env.tasks.humanoid_amp_task import HumanoidAMPTask
 
 import learning.replay_buffer as replay_buffer
 import learning.common_agent as common_agent
-
+import os
+import yaml
 from tensorboardX import SummaryWriter
 import copy
 from phc.utils.torch_utils import project_to_norm
 import learning.amp_datasets as amp_datasets
 from phc.learning.loss_functions import kl_multi
 from smpl_sim.utils.math_utils import LinearAnneal
+import open_clip
 
 def load_my_state_dict(target, saved_dict):
     for name, param in saved_dict.items():
@@ -32,6 +34,20 @@ def load_my_state_dict(target, saved_dict):
         if target[name].shape == param.shape:
             target[name].copy_(param)
 
+class FeatureExtractor():
+    def __init__(self):
+        self.mlip_model, _, self.mlip_preprocess = open_clip.create_model_and_transforms('ViT-B-32',
+                                                                                         pretrained='laion2b_s34b_b79k', device="cuda")
+        self.tokenizer = open_clip.get_tokenizer('ViT-B-32')
+
+    def encode_texts(self, texts):
+        texts_token = self.tokenizer(texts).cuda()
+        text_features = self.mlip_model.encode_text(texts_token).cuda()
+        text_features_norm = text_features / text_features.norm(dim=-1, keepdim=True)
+        return text_features_norm
+
+    def encode_images(self, images):
+        return self.mlip_model.encode_image(images)
 
 class AMPAgent(common_agent.CommonAgent):
 
@@ -75,7 +91,8 @@ class AMPAgent(common_agent.CommonAgent):
             self.freeze_state_weights()  # freeze the mean stds.
             load_my_state_dict(self.model.state_dict(), checkpoint['model'])  # loads everything (model, std, ect.). that can be load from the last model.
             # self.value_mean_std # not freezing value function though.
-        
+
+
         return
     
     def set_stats_weights(self, weights):
@@ -155,9 +172,40 @@ class AMPAgent(common_agent.CommonAgent):
             B, S, _ = self.experience_buffer.tensor_dict['obses'].shape
             self.experience_buffer.tensor_dict['z_noise'] = torch.zeros(B, S, self.model.a2c_network.embedding_size).to(self.experience_buffer.tensor_dict['obses'])
             self.tensor_list += ['z_noise']
-            
+
+        batch_shape = self.experience_buffer.obs_base_shape
+        self._latent_reset_steps = torch.zeros(batch_shape[-1], dtype=torch.int32, device=self.ppo_device)
+        self.clip_features = []
+        self.motionclip_features = []
+        self.mlip_encoder = FeatureExtractor()
+        self.text_file = "phc/data/texts.yaml"
+        texts, texts_weights = self.load_texts(self.text_file)
+        self.text_features = self.mlip_encoder.encode_texts(texts)
+        self.text_weights = torch.tensor(texts_weights, device=self.device)
+        self._text_latents = torch.zeros((batch_shape[-1], 512), dtype=torch.float32,
+                                         device=self.ppo_device)
+        self._latent_text_idx = torch.zeros((batch_shape[-1],), dtype=torch.long, device=self.ppo_device)
+        self._latent_steps_min = 30
+        self._latent_steps_max = 90
+
         return
 
+    def load_texts(self, text_file):
+        ext = os.path.splitext(text_file)[1]
+        assert ext == ".yaml"
+        weights = []
+        texts = []
+        with open(os.path.join(os.getcwd(), text_file), 'r') as f:
+            text_config = yaml.load(f, Loader=yaml.SafeLoader)
+
+        text_list = text_config['texts']
+        for text_entry in text_list:
+            curr_text = text_entry['text']
+            curr_weight = text_entry['weight']
+            assert (curr_weight >= 0)
+            weights.append(curr_weight)
+            texts.append(curr_text)
+        return texts, weights
     def set_eval(self):
         super().set_eval()
         if self._normalize_amp_input:
@@ -338,6 +386,112 @@ class AMPAgent(common_agent.CommonAgent):
         
         return batch_dict
 
+    def _reset_latents(self, env_ids):
+        n = len(env_ids)
+        z, z_text_idx = self._sample_latents(n)
+        self._text_latents[env_ids] = z
+        self._latent_text_idx[env_ids] = z_text_idx
+
+        return
+
+    def _sample_latents(self, n):
+        z, z_text_idx = self.model.a2c_network.sample_text_embeddings(n, self.text_features, self.text_weights)
+        return z, z_text_idx
+
+    def _update_latents(self):
+        new_latent_envs = self._latent_reset_steps <= self.vec_env.env.task.progress_buf
+
+        need_update = torch.any(new_latent_envs)
+        if (need_update):
+            new_latent_env_ids = new_latent_envs.nonzero(as_tuple=False).flatten()
+            self._reset_latents(new_latent_env_ids)
+            self._latent_reset_steps[new_latent_env_ids] += torch.randint_like(self._latent_reset_steps[new_latent_env_ids],
+                                                                               low=self._latent_steps_min,
+                                                                               high=self._latent_steps_max)
+
+        return
+
+
+    def env_step(self, actions):
+        actions = self.preprocess_actions(actions)
+        obs = self.obs['obs']
+
+        rewards = 0.0
+        max_anyksill = torch.zeros([1024], device=self.device, dtype=torch.float32)
+        disc_rewards = 0.0
+        done_count = 0.0
+        terminate_count = 0.0
+        self._llc_steps  = 1
+
+        for t in range(self._llc_steps): # low-level controller sample 5
+
+            obs, aux_rewards, curr_dones, infos = self.vec_env.step(actions) # 223d update actions
+
+
+            images = self.vec_env.env.task.render_img()
+
+            image_features = self.mlip_encoder.encode_images(images)
+            state_embeds = self.vec_env.env.task._rigid_body_state_reshaped[:, :15, :3]
+            # print("we have render")
+            self.clip_features.append(image_features.data.cpu().numpy())
+            self.motionclip_features.append(state_embeds.data.cpu().numpy())
+            image_features_norm = image_features / image_features.norm(dim=-1, keepdim=True)
+
+
+
+            # eu_dis = F.pairwise_distance(image_features_norm, image_features_mlp_norm, keepdim=True)
+            # cos_ids = F.cosine_similarity(image_features_norm, image_features_mlp_norm, dim=1)
+
+            done_count += curr_dones
+            terminate_count += infos['terminate']
+            amp_obs = infos['amp_obs']
+            # connie
+            # curr_disc_reward = self._calc_disc_reward(amp_obs)
+            # disc_rewards += curr_disc_reward
+
+            # average
+            anyskill_rewards, delta, similarity = self.vec_env.env.task.compute_anyskill_reward(image_features_norm, self._text_latents,
+                                                                             self._latent_text_idx)
+
+            # # max
+            # max_anyksill = torch.max(max_anyksill, anyskill_rewards)
+            # curr_rewards = max_anyksill
+
+            curr_rewards = anyskill_rewards
+
+            rewards += curr_rewards
+
+        # self._exp_sim[step] = anyskill_count.mean(dim=0) #(1024,)
+        rewards /= self._llc_steps #(1024,)
+        disc_rewards /= self._llc_steps
+        dones = torch.zeros_like(done_count)
+        dones[done_count > 0] = 1.0
+        terminate = torch.zeros_like(terminate_count)
+        terminate[terminate_count > 0] = 1.0
+        infos['terminate'] = terminate
+        infos['disc_rewards'] = disc_rewards
+
+
+        # wandb.log({"info/delta": delta.mean().item()}, step)
+        # wandb.log({"reward/spec_anyskill_reward": anyskill_rewards.mean().item()}, step)
+        # wandb.log({"reward/spec_aux_reward": aux_rewards.mean().item()}, step)
+        # wandb.log({"info/eposide": self.vec_env.env.task.eposide}, step)
+        # wandb.log({"info/clip_similarity": delta.mean().item()}, step)
+        # # wandb.log({"info/eu_dis": eu_dis.mean().item()}, step)
+        # # wandb.log({"info/cos_dis": cos_ids.mean().item()}, step)
+        # wandb.log({"info/step": step}, step)
+        self.vec_env.env.task.eposide = 0
+
+        if self.is_tensor_obses:
+            if self.value_size == 1:
+                rewards = rewards.unsqueeze(1)
+            return self.obs_to_tensors(obs), rewards.to(self.ppo_device), dones.to(self.ppo_device), infos
+        else:
+            if self.value_size == 1:
+                rewards = np.expand_dims(rewards, axis=1)
+            return self.obs_to_tensors(obs), torch.from_numpy(rewards).to(self.ppo_device).float(), torch.from_numpy(dones).to(self.ppo_device), infos, actions
+
+
     def play_steps(self):
         self.set_eval()
         humanoid_env = self.vec_env.env.task
@@ -348,7 +502,7 @@ class AMPAgent(common_agent.CommonAgent):
         terminated_flags = torch.zeros(self.num_actors, device=self.device)
         reward_raw = torch.zeros(1, device=self.device)
         for n in range(self.horizon_length):
-
+            self._update_latents()
             self.obs = self.env_reset(done_indices)
             self.experience_buffer.update_data('obses', n, self.obs['obs'])
 
