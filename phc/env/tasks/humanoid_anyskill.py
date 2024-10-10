@@ -72,6 +72,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         self.mlip_encoder = FeatureExtractor()
 
         self.RENDER = True
+        self.headless = headless
         self.motionclip_features = []
 
         # batch_shape = self.experience_buffer.obs_base_shape
@@ -284,20 +285,20 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         return obs
 
     def _compute_reward(self, actions):
-        if self.headless == False:
-            images = self.render_img()
-        else:
-            # print("apply the headless mode")
-            images = self.render_headless()
-
-        image_features = self.mlip_encoder.encode_images(images)
-
-        state_embeds = self._rigid_body_state_reshaped
-
-        # print("we have render")
-        self.clip_features.append(image_features.data.cpu().numpy())
-        self.motionclip_features.append(state_embeds.data.cpu().numpy())
-        image_features_norm = image_features / image_features.norm(dim=-1, keepdim=True)
+        # if self.headless == False:
+        #     images = self.render_img()
+        # else:
+        #     # print("apply the headless mode")
+        #     images = self.render_headless()
+        #
+        # image_features = self.mlip_encoder.encode_images(images)
+        #
+        # state_embeds = self._rigid_body_state_reshaped
+        #
+        # # print("we have render")
+        # self.clip_features.append(image_features.data.cpu().numpy())
+        # self.motionclip_features.append(state_embeds.data.cpu().numpy())
+        # image_features_norm = image_features / image_features.norm(dim=-1, keepdim=True)
 
 
 

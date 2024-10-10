@@ -427,8 +427,11 @@ class AMPAgent(common_agent.CommonAgent):
 
             obs, aux_rewards, curr_dones, infos = self.vec_env.step(actions) # 223d update actions
 
-
-            images = self.vec_env.env.task.render_img()
+            if self.vec_env.env.task.headless == False:
+                images = self.vec_env.env.task.render_img()
+            else:
+                # print("apply the headless mode")
+                images = self.vec_env.env.task.render_headless()
 
             image_features = self.mlip_encoder.encode_images(images)
             state_embeds = self.vec_env.env.task._rigid_body_state_reshaped[:, :15, :3]
