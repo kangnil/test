@@ -59,7 +59,7 @@ from tqdm import tqdm
 # Base class for RL tasks
 class BaseTask():
 
-    def __init__(self, cfg, enable_camera_sensors=False):
+    def __init__(self, cfg, enable_camera_sensors=True):
         self.headless = cfg["headless"]
         if self.headless == False and not flags.no_virtual_display:
             from pyvirtualdisplay.smartdisplay import SmartDisplay
@@ -455,7 +455,9 @@ class BaseTask():
 
             else:
                 self.gym.poll_viewer_events(self.viewer)
-                
+        else:
+            self.gym.fetch_results(self.sim, True)
+            self.gym.step_graphics(self.sim)
         # else:
         #     if flags.server_mode:
         #         # headless server model only support rendering from one env

@@ -126,7 +126,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
     def _init_camera_headless(self):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self._cam_prev_char_pos = torch.zeros([self.num_envs, 3], device=self.device, dtype=torch.float32)
-        self.cam_pos = gymapi.Vec3(self._cam_prev_char_pos[0, 0] + 3.0,
+        self.cam_pos = gymapi.Vec3(self._cam_prev_char_pos[0, 0] + 1.0,
                               self._cam_prev_char_pos[0, 1],
                               1.0)
         # cam_pos = gymapi.Vec3(self._cam_prev_char_pos[0, 0],

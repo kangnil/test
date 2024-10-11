@@ -13,7 +13,8 @@ from torch import optim
 import torch
 from torch import nn
 from phc.env.tasks.humanoid_amp_task import HumanoidAMPTask
-
+from torchvision import transforms
+from PIL import Image
 import learning.replay_buffer as replay_buffer
 import learning.common_agent as common_agent
 import os
@@ -293,7 +294,7 @@ class AMPAgent(common_agent.CommonAgent):
                 # pure behavior cloning, kinemaitc loss. 
                 self.obs, rewards, self.dones, infos = self.env_step(res_dict['mus'])
             else:
-                self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
+                self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'], self.epoch_num *32 + n)
             
                 
             shaped_rewards = self.rewards_shaper(rewards)
@@ -412,7 +413,7 @@ class AMPAgent(common_agent.CommonAgent):
         return
 
 
-    def env_step(self, actions):
+    def env_step(self, actions, step):
         actions = self.preprocess_actions(actions)
         obs = self.obs['obs']
 
@@ -429,15 +430,28 @@ class AMPAgent(common_agent.CommonAgent):
 
             if self.vec_env.env.task.headless == False:
                 images = self.vec_env.env.task.render_img()
+                if step%1000==0:
+                    transform = transforms.ToPILImage()
+                    pil_image = transform(images[0])
+
+                    # Save the image as a JPG file
+                    pil_image.save(f"output/renderings/rendered/headless_false_{step}.jpg")
             else:
                 # print("apply the headless mode")
                 images = self.vec_env.env.task.render_headless()
+                if step % 1000 == 0:
+                    transform = transforms.ToPILImage()
+                    pil_image = transform(images[0])
+
+                    # Save the image as a JPG file
+                    pil_image.save(f"output/renderings/rendered/headless_true_{step}.jpg")
+
 
             image_features = self.mlip_encoder.encode_images(images)
-            state_embeds = self.vec_env.env.task._rigid_body_state_reshaped[:, :15, :3]
+            #state_embeds = self.vec_env.env.task._rigid_body_state_reshaped[:, :15, :3]
             # print("we have render")
             self.clip_features.append(image_features.data.cpu().numpy())
-            self.motionclip_features.append(state_embeds.data.cpu().numpy())
+            #self.motionclip_features.append(state_embeds.data.cpu().numpy())
             image_features_norm = image_features / image_features.norm(dim=-1, keepdim=True)
 
 
@@ -455,7 +469,8 @@ class AMPAgent(common_agent.CommonAgent):
             # average
             anyskill_rewards, delta, similarity = self.vec_env.env.task.compute_anyskill_reward(image_features_norm, self._text_latents,
                                                                              self._latent_text_idx)
-
+            print("anyskill mean reward is ", torch.mean(anyskill_rewards))
+            print("auxreward mean is ", torch.mean(aux_rewards))
             # # max
             # max_anyksill = torch.max(max_anyksill, anyskill_rewards)
             # curr_rewards = max_anyksill
@@ -466,6 +481,7 @@ class AMPAgent(common_agent.CommonAgent):
 
         # self._exp_sim[step] = anyskill_count.mean(dim=0) #(1024,)
         rewards /= self._llc_steps #(1024,)
+        print("rewards mean ", rewards.mean())
         disc_rewards /= self._llc_steps
         dones = torch.zeros_like(done_count)
         dones[done_count > 0] = 1.0
@@ -474,7 +490,7 @@ class AMPAgent(common_agent.CommonAgent):
         infos['terminate'] = terminate
         infos['disc_rewards'] = disc_rewards
 
-
+        # step = self.epoch_num
         # wandb.log({"info/delta": delta.mean().item()}, step)
         # wandb.log({"reward/spec_anyskill_reward": anyskill_rewards.mean().item()}, step)
         # wandb.log({"reward/spec_aux_reward": aux_rewards.mean().item()}, step)
@@ -483,7 +499,7 @@ class AMPAgent(common_agent.CommonAgent):
         # # wandb.log({"info/eu_dis": eu_dis.mean().item()}, step)
         # # wandb.log({"info/cos_dis": cos_ids.mean().item()}, step)
         # wandb.log({"info/step": step}, step)
-        self.vec_env.env.task.eposide = 0
+        # self.vec_env.env.task.eposide = 0
 
         if self.is_tensor_obses:
             if self.value_size == 1:
@@ -525,7 +541,7 @@ class AMPAgent(common_agent.CommonAgent):
                 # pure behavior cloning, kinemaitc loss. 
                 self.obs, rewards, self.dones, infos = self.env_step(res_dict['mus'])
             else:
-                self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
+                self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'], self.epoch_num * 32 + n)
                 
             shaped_rewards = self.rewards_shaper(rewards)
             self.experience_buffer.update_data('rewards', n, shaped_rewards)
