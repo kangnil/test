@@ -64,7 +64,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         self.power_coefficient = cfg["env"].get("power_coefficient", 0.0005)
         self.power_usage_coefficient = cfg["env"].get("power_usage_coefficient", 0.0025)
         self.power_acc = torch.zeros((self.num_envs, 2)).to(self.device)
-
+        self.text_yaml = cfg["env"].get("text_yaml", None)
         self.delta = torch.zeros([self.num_envs], device=self.device, dtype=torch.float)
         self._similarity = torch.zeros([self.num_envs], device=self.device, dtype=torch.float32)
         self._punish_counter = torch.zeros([self.num_envs], device=self.device, dtype=torch.int)

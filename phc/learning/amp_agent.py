@@ -179,8 +179,8 @@ class AMPAgent(common_agent.CommonAgent):
         self.clip_features = []
         self.motionclip_features = []
         self.mlip_encoder = FeatureExtractor()
-        self.text_file = "phc/data/texts.yaml"
-        texts, texts_weights = self.load_texts(self.text_file)
+
+        texts, texts_weights = self.load_texts(self.vec_env.env.task.text_file)
         self.text_features = self.mlip_encoder.encode_texts(texts)
         self.text_weights = torch.tensor(texts_weights, device=self.device)
         self._text_latents = torch.zeros((batch_shape[-1], 512), dtype=torch.float32,

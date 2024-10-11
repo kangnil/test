@@ -63,6 +63,7 @@ key_bodies: ["R_Ankle", "L_Ankle", "R_Wrist",  "L_Wrist"]
 contact_bodies: ["R_Ankle", "L_Ankle", "R_Toe", "L_Toe"]
 terminationHeight: 0.15
 enableEarlyTermination: True
+text_yaml: "phc/data/texts.yaml"
 
 asset:
   assetRoot: "/"
