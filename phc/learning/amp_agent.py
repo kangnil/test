@@ -430,21 +430,21 @@ class AMPAgent(common_agent.CommonAgent):
 
             if self.vec_env.env.task.headless == False:
                 images = self.vec_env.env.task.render_img()
-                if step%100==0:
-                    transform = transforms.ToPILImage()
-                    pil_image = transform(images[0])
-
-                    # Save the image as a JPG file
-                    pil_image.save(f"output/renderings/rendered/headless_false_{step}.jpg")
+                # if step%100==0:
+                #     transform = transforms.ToPILImage()
+                #     pil_image = transform(images[0])
+                #
+                #     # Save the image as a JPG file
+                #     pil_image.save(f"output/renderings/rendered/headless_false_{step}.jpg")
             else:
                 # print("apply the headless mode")
                 images = self.vec_env.env.task.render_headless()
-                if step % 1000 == 0:
-                    transform = transforms.ToPILImage()
-                    pil_image = transform(images[0])
-
-                    # Save the image as a JPG file
-                    pil_image.save(f"output/renderings/rendered/headless_true_{step}.jpg")
+                # if step % 100 == 0:
+                #     transform = transforms.ToPILImage()
+                #     pil_image = transform(images[0])
+                #
+                #     # Save the image as a JPG file
+                #     pil_image.save(f"output/renderings/rendered/headless_true_{step}.jpg")
 
 
             image_features = self.mlip_encoder.encode_images(images)
@@ -479,8 +479,8 @@ class AMPAgent(common_agent.CommonAgent):
             rewards += curr_rewards
 
         # self._exp_sim[step] = anyskill_count.mean(dim=0) #(1024,)
-        rewards /= self._llc_steps #(1024,)
-        print("rewards mean ", rewards.mean())
+        #rewards /= self._llc_steps #(1024,)
+        print("rewards 0", rewards[0])
         disc_rewards /= self._llc_steps
         dones = torch.zeros_like(done_count)
         dones[done_count > 0] = 1.0
@@ -540,7 +540,7 @@ class AMPAgent(common_agent.CommonAgent):
                 # pure behavior cloning, kinemaitc loss. 
                 self.obs, rewards, self.dones, infos = self.env_step(res_dict['mus'])
             else:
-                self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'], self.epoch_num * 32 + n)
+                self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'], (self.epoch_num-1) * self.horizon_length + n)
                 
             shaped_rewards = self.rewards_shaper(rewards)
             self.experience_buffer.update_data('rewards', n, shaped_rewards)

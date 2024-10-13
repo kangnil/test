@@ -459,7 +459,7 @@ def compute_humanoid_reset(reset_buf, progress_buf, contact_buf, contact_body_id
         retain_probability = 0.8
         random_tensor = torch.rand_like(mlip_mask, dtype=torch.float)
         retain_mask = random_tensor < retain_probability
-        mlip_mask = mlip_mask * retain_mask.int()
+        mlip_mask = torch.logical_and(mlip_mask, retain_mask)
 
         has_fallen = torch.logical_or(fall_contact, fall_height)
         has_fallen = torch.logical_or(has_fallen, mlip_mask)
