@@ -59,7 +59,7 @@ params:
     score_to_win: 20000
     max_epochs: 100
     save_best_after: 100
-    save_frequency: 500
+    save_frequency: 10
     print_stats: False
     save_intermediate: True
     entropy_coef: 0.0
