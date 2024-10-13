@@ -1188,7 +1188,7 @@ class HumanoidIm(humanoid_amp_task.HumanoidAMPTask):
         is_recovery = torch.logical_and(~pass_time, self._cycle_counter > 0)  # pass time should override the cycle counter.
         self.reset_buf[is_recovery] = 0
         self._terminate_buf[is_recovery] = 0
-        
+        self._punish_counter[is_recovery] = 0
         return
 
     def _draw_task(self):

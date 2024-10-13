@@ -180,7 +180,7 @@ class AMPAgent(common_agent.CommonAgent):
         self.motionclip_features = []
         self.mlip_encoder = FeatureExtractor()
 
-        texts, texts_weights = self.load_texts(self.vec_env.env.task.text_file)
+        texts, texts_weights = self.load_texts(self.vec_env.env.task.text_yaml)
         self.text_features = self.mlip_encoder.encode_texts(texts)
         self.text_weights = torch.tensor(texts_weights, device=self.device)
         self._text_latents = torch.zeros((batch_shape[-1], 512), dtype=torch.float32,
@@ -392,7 +392,7 @@ class AMPAgent(common_agent.CommonAgent):
         z, z_text_idx = self._sample_latents(n)
         self._text_latents[env_ids] = z
         self._latent_text_idx[env_ids] = z_text_idx
-
+        self.vec_env.env.task._text_latents = self._text_latents
         return
 
     def _sample_latents(self, n):
@@ -422,7 +422,7 @@ class AMPAgent(common_agent.CommonAgent):
         disc_rewards = 0.0
         done_count = 0.0
         terminate_count = 0.0
-        self._llc_steps  = 1
+        self._llc_steps  = 5
 
         for t in range(self._llc_steps): # low-level controller sample 5
 
@@ -430,7 +430,7 @@ class AMPAgent(common_agent.CommonAgent):
 
             if self.vec_env.env.task.headless == False:
                 images = self.vec_env.env.task.render_img()
-                if step%1000==0:
+                if step%100==0:
                     transform = transforms.ToPILImage()
                     pil_image = transform(images[0])
 
@@ -469,8 +469,7 @@ class AMPAgent(common_agent.CommonAgent):
             # average
             anyskill_rewards, delta, similarity = self.vec_env.env.task.compute_anyskill_reward(image_features_norm, self._text_latents,
                                                                              self._latent_text_idx)
-            print("anyskill mean reward is ", torch.mean(anyskill_rewards))
-            print("auxreward mean is ", torch.mean(aux_rewards))
+
             # # max
             # max_anyksill = torch.max(max_anyksill, anyskill_rewards)
             # curr_rewards = max_anyksill

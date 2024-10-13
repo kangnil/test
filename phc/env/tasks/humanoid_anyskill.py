@@ -74,7 +74,8 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         self.RENDER = True
         self.headless = headless
         self.motionclip_features = []
-
+        self._text_latents = torch.zeros((self.num_envs, 512), dtype=torch.float32,
+                                         device=self.device)
         # batch_shape = self.experience_buffer.obs_base_shape
         # self._latent_reset_steps = torch.zeros(batch_shape[-1], dtype=torch.int32, device=self.ppo_device)
         #
@@ -91,7 +92,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
     def get_task_obs_size(self):
         obs_size = 0
         if (self._enable_task_obs):
-            obs_size = 2
+            obs_size = 512
         return obs_size
 
     def pre_physics_step(self, actions):
@@ -272,17 +273,25 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         return flip_task_obs
 
     def _compute_task_obs(self, env_ids=None):
-        if (env_ids is None):
-            root_states = self._humanoid_root_states
-
+        if len(env_ids) >0:
+            obs = self._text_latents[env_ids]
         else:
-            root_states = self._humanoid_root_states[env_ids]
-
-
-        obs = compute_anyskill_observations(root_states)
-
-
+            obs = self._text_latents
         return obs
+
+
+    def _compute_reset(self):
+
+        self.reset_buf[:], self._terminate_buf[:] = compute_humanoid_reset(self.reset_buf, self.progress_buf,
+                                                                           self._contact_forces,
+                                                                           self._contact_body_ids,
+                                                                           self._rigid_body_pos,
+                                                                           self.max_episode_length,
+                                                                           self._enable_early_termination,
+                                                                           self._termination_heights,
+                                                                           self._punish_counter)
+
+        return
 
     def _compute_reward(self, actions):
         # if self.headless == False:
@@ -424,19 +433,39 @@ def load_texts(text_file):
 #####################################################################
 
 #@torch.jit.script
-def compute_anyskill_observations(root_states):
-    # type: (Tensor) -> Tensor
-    root_rot = root_states[:, 3:7]
+def compute_humanoid_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
+                           max_episode_length,
+                           enable_early_termination, termination_heights, _punish_counter):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, Tensor, Tensor) -> Tuple[Tensor, Tensor]
+    contact_force_threshold = 50.0
 
-    tar_dir3d = torch.zeros_like(root_states[..., 0:3])
-    tar_dir3d[..., 0] = 1
-    heading_rot = torch_utils.calc_heading_quat_inv(root_rot)
+    terminated = torch.zeros_like(reset_buf)
 
-    local_tar_dir = torch_utils.my_quat_rotate(heading_rot, tar_dir3d)
-    local_tar_dir = local_tar_dir[..., 0:2]
+    if (enable_early_termination):
+        masked_contact_buf = contact_buf.clone()
 
-    obs =  local_tar_dir
+        masked_contact_buf[:, contact_body_ids, :] = 0
+        force_threshold = 50
+        fall_contact = torch.sqrt(torch.square(torch.abs(masked_contact_buf.sum(dim=-2))).sum(dim=-1)) > force_threshold
 
-    return obs
+        body_height = rigid_body_pos[..., 2]
+        fall_height = body_height < termination_heights
+        fall_height[:, contact_body_ids] = False
+        fall_height = torch.any(fall_height, dim=-1)
 
+        mlip_mask = _punish_counter > 8
+        if mlip_mask.shape[0]<=16:
+            print("mlip_mask", mlip_mask)
+        has_fallen = torch.logical_or(fall_contact, fall_height)  # don't touch the hurdle.
+        has_fallen = torch.logical_or(has_fallen, mlip_mask)
+
+        has_failed = has_fallen
+        # first timestep can sometimes still have nonzero contact forces
+        # so only check after first couple of steps
+        has_failed *= (progress_buf > 1)
+        terminated = torch.where(has_failed, torch.ones_like(reset_buf), terminated)
+
+    reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), terminated)
+
+    return reset, terminated
 

@@ -607,7 +607,7 @@ class Humanoid(BaseTask):
         self.reset_buf[env_ids] = 0
         self._terminate_buf[env_ids] = 0
         self._contact_forces[env_ids] = 0
-
+        self._punish_counter[env_ids] = 0
         return
 
     def _create_ground_plane(self):
