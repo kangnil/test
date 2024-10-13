@@ -437,7 +437,6 @@ def compute_humanoid_reset(reset_buf, progress_buf, contact_buf, contact_body_id
                            max_episode_length,
                            enable_early_termination, termination_heights, _punish_counter):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, Tensor, Tensor) -> Tuple[Tensor, Tensor]
-    contact_force_threshold = 50.0
 
     terminated = torch.zeros_like(reset_buf)
 
@@ -456,7 +455,13 @@ def compute_humanoid_reset(reset_buf, progress_buf, contact_buf, contact_body_id
         mlip_mask = _punish_counter > 8
         if mlip_mask.shape[0]<=16:
             print("mlip_mask", mlip_mask)
-        has_fallen = torch.logical_or(fall_contact, fall_height)  # don't touch the hurdle.
+
+        retain_probability = 0.8
+        random_tensor = torch.rand_like(mlip_mask, dtype=torch.float)
+        retain_mask = random_tensor < retain_probability
+        mlip_mask = mlip_mask * retain_mask.int()
+
+        has_fallen = torch.logical_or(fall_contact, fall_height)
         has_fallen = torch.logical_or(has_fallen, mlip_mask)
 
         has_failed = has_fallen
