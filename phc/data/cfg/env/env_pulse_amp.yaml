@@ -48,6 +48,8 @@ tarSpeedMax: 5
 speedChangeStepsMin: 100
 speedChangeStepsMax: 200
 enableTaskObs: True
+text_command: "kick"
+
 
 control_mode: "isaac_pd"
 power_scale: 1.0
