@@ -63,7 +63,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         self.text_features_norm = self.mlip_encoder.encode_texts(self.text_command).repeat(self.num_envs, 1)
 
         self._similarity = torch.zeros([self.num_envs], device=self.device, dtype=torch.float32)
-        self._punish_counter = torch.zeros([self.num_envs], device=self.device, dtype=torch.int)
+        #self._punish_counter = torch.zeros([self.num_envs], device=self.device, dtype=torch.int)
 
 
         # self._speed_change_steps = torch.zeros([self.num_envs], device=self.device, dtype=torch.int64)
@@ -265,6 +265,12 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
 
         return self.torch_rgba_tensor.permute(0, 3, 1, 2)
 
+    # def _reset_env_tensors(self, env_ids):
+    #     super()._reset_env_tensors(env_ids)
+    #     self._punish_counter[env_ids] = 0
+    #     if 0 in env_ids:
+    #         print("punish counter 0 reset")
+    #     return
 
 
     # def _update_task(self):
@@ -313,8 +319,8 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
     def compute_anyskill_reward(self ):
         similarity = torch.einsum('ij,ij->i',  self.image_features_norm,  self.text_features_norm)
         self.delta = similarity - self._similarity
-        punish_mask = self.delta < 0
-        self._punish_counter[punish_mask] += 1
+        #punish_mask = self.delta < 0
+        #self._punish_counter[punish_mask] += 1
 
         # # value
         clip_reward = similarity
@@ -371,47 +377,32 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
     #     self._update_marker()
     #     return
     
-    def _reset_ref_state_init(self, env_ids):
-        super()._reset_ref_state_init(env_ids)
-        self.power_acc[env_ids] = 0
+    # def _reset_ref_state_init(self, env_ids):
+    #     super()._reset_ref_state_init(env_ids)
+    #     self.power_acc[env_ids] = 0
     
-    def _sample_ref_state(self, env_ids):
-        motion_ids, motion_times, root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, rb_pos, rb_rot, body_vel, body_ang_vel  = super()._sample_ref_state(env_ids)
-        
-        # ZL Hack: Forcing to always be facing the x-direction. 
-        if not self._has_upright_start:
-            heading_rot_inv = torch_utils.calc_heading_quat_inv(humanoid_amp.remove_base_rot(root_rot))
-        else:
-            heading_rot_inv = torch_utils.calc_heading_quat_inv(root_rot)
-            
-        
-        
-        heading_rot_inv_repeat = heading_rot_inv[:, None].repeat(1, len(self._body_names), 1)
-        root_rot = quat_mul(heading_rot_inv, root_rot).clone()
-        rb_pos = quat_apply(heading_rot_inv_repeat, rb_pos - root_pos[:, None, :]).clone() + root_pos[:, None, :]
-        rb_rot = quat_mul(heading_rot_inv_repeat, rb_rot).clone()
-        root_ang_vel = quat_apply(heading_rot_inv, root_ang_vel).clone()
-        root_vel = quat_apply(heading_rot_inv, root_vel).clone()
-        body_vel = quat_apply(heading_rot_inv_repeat, body_vel).clone()
-        
-        return motion_ids, motion_times, root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, rb_pos, rb_rot, body_vel, body_ang_vel 
+    # def _sample_ref_state(self, env_ids):
+    #     motion_ids, motion_times, root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, rb_pos, rb_rot, body_vel, body_ang_vel  = super()._sample_ref_state(env_ids)
+    #
+    #     # ZL Hack: Forcing to always be facing the x-direction.
+    #     if not self._has_upright_start:
+    #         heading_rot_inv = torch_utils.calc_heading_quat_inv(humanoid_amp.remove_base_rot(root_rot))
+    #     else:
+    #         heading_rot_inv = torch_utils.calc_heading_quat_inv(root_rot)
+    #
+    #
+    #
+    #     heading_rot_inv_repeat = heading_rot_inv[:, None].repeat(1, len(self._body_names), 1)
+    #     root_rot = quat_mul(heading_rot_inv, root_rot).clone()
+    #     rb_pos = quat_apply(heading_rot_inv_repeat, rb_pos - root_pos[:, None, :]).clone() + root_pos[:, None, :]
+    #     rb_rot = quat_mul(heading_rot_inv_repeat, rb_rot).clone()
+    #     root_ang_vel = quat_apply(heading_rot_inv, root_ang_vel).clone()
+    #     root_vel = quat_apply(heading_rot_inv, root_vel).clone()
+    #     body_vel = quat_apply(heading_rot_inv_repeat, body_vel).clone()
+    #
+    #     return motion_ids, motion_times, root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, rb_pos, rb_rot, body_vel, body_ang_vel
+    #
 
-    def _hack_output_motion_target(self):
-        if (not hasattr(self, '_output_motion_target_speed')):
-            self._output_motion_target_speed = []
-
-        tar_speed = self._tar_speed[0].cpu().numpy()
-        self._output_motion_target_speed.append(tar_speed)
-
-        reset = self.reset_buf[0].cpu().numpy() == 1
-
-        if (reset and len(self._output_motion_target_speed) > 1):
-            output_data = np.array(self._output_motion_target_speed)
-            np.save('output/record_tar_speed.npy', output_data)
-
-            self._output_motion_target_speed = []
-
-        return
 
 class HumanoidAnyskillZ(HumanoidAnyskill):
     def __init__(self, cfg, sim_params, physics_engine, device_type, device_id, headless):
@@ -423,16 +414,16 @@ class HumanoidAnyskillZ(HumanoidAnyskill):
         if self.RENDER:
             if self.cfg.headless == False:
                 images = self.render_img()
-                transform = transforms.ToPILImage()
-                pil_image = transform(images[0])
-                os.makedirs("output/renderings/rendered/", exist_ok=True)
-                pil_image.save(f"output/renderings/rendered/rendered.jpg")
+                # transform = transforms.ToPILImage()
+                # pil_image = transform(images[0])
+                # os.makedirs("output/renderings/rendered/", exist_ok=True)
+                # pil_image.save(f"output/renderings/rendered/rendered.jpg")
 
             else:
                 images = self.render_headless()
-                transform = transforms.ToPILImage()
-                pil_image = transform(images[0])
-                os.makedirs("output/renderings/rendered/", exist_ok=True)
+                #transform = transforms.ToPILImage()
+                #pil_image = transform(images[0])
+                #os.makedirs("output/renderings/rendered/", exist_ok=True)
                 #pil_image.save(f"output/renderings/rendered/rendered_headless.jpg")
             image_features = self.mlip_encoder.encode_images(images)
             self.image_features_norm = image_features / image_features.norm(dim=-1, keepdim=True)
@@ -451,22 +442,7 @@ class HumanoidAnyskillZ(HumanoidAnyskill):
 ###=========================jit functions=========================###
 #####################################################################
 
-@torch.jit.script
-def compute_speed_observations(root_states, tar_speed):
-    # type: (Tensor, Tensor) -> Tensor
-    root_rot = root_states[:, 3:7]
 
-    tar_dir3d = torch.zeros_like(root_states[..., 0:3])
-    tar_dir3d[..., 0] = 1
-    heading_rot = torch_utils.calc_heading_quat_inv(root_rot)
-
-    local_tar_dir = torch_utils.my_quat_rotate(heading_rot, tar_dir3d)
-    local_tar_dir = local_tar_dir[..., 0:2]
-    tar_speed = tar_speed.unsqueeze(-1)
-
-    obs = torch.cat([local_tar_dir, tar_speed], dim=-1)
-
-    return obs
 
 @torch.jit.script
 def compute_speed_reward(root_pos, prev_root_pos, root_rot, tar_speed, dt):
@@ -487,3 +463,5 @@ def compute_speed_reward(root_pos, prev_root_pos, root_rot, tar_speed, dt):
     reward = dir_reward * vel_reward_w
 
     return reward
+
+
