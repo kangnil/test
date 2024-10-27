@@ -958,9 +958,10 @@ class Humanoid(BaseTask):
         if self.humanoid_type in ["smpl", "smplh", "smplx"]:
             gender = self.humanoid_shapes[env_id, 0].long()
             percentage = 1 - np.clip((humanoid_mass - 70) / 70, 0, 1)
+            percentage = 0.2
             if gender == 0:
                 gender = 1
-                color_vec = gymapi.Vec3(*get_color_gradient(percentage, "Greens"))
+                color_vec = gymapi.Vec3(*get_color_gradient(percentage, "Oranges"))
             elif gender == 1:
                 gender = 2
                 color_vec = gymapi.Vec3(*get_color_gradient(percentage, "Blues"))
