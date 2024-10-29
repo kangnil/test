@@ -42,11 +42,19 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         if self.RENDER:
             self._init_camera()
 
-      
-        #self.clip_flant5_score = t2v_metrics.VQAScore(model='clip-flant5-xxl')  # our recommended scoring model
-        openai_key=""
-        self.clip_flant5_score = t2v_metrics.get_score_model(model="gpt-4o", device="cuda", openai_key=openai_key, top_logprobs=20)
-            
+        #self.llm_model = 'clip-flant5-xxl'
+        self.llm_model='llava-v1.5-13b'
+
+        
+        if self.llm_model=='gpt-4o':
+            openai_key = "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"
+            self.clip_flant5_score = t2v_metrics.get_score_model(model="gpt-4o", device="cuda", openai_key=openai_key, top_logprobs=20)
+        elif self.llm_model=='llava-v1.5-13b':
+            self.clip_flant5_score = t2v_metrics.VQAScore(model='llava-v1.5-13b')
+        elif self.llm_model=='clip-flant5-xxl':  
+            self.clip_flant5_score = t2v_metrics.VQAScore(model='clip-flant5-xxl')  # our recommended scoring model
+        else:
+            print("check-----------------------------------------------")
 
         self.text_command = cfg["env"].get("text_command", "a person is running")
 
@@ -224,23 +232,24 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         return
 
     def compute_vqascore_reward(self, curr_images, text_command):
-        convert_to_Image = False
-        if convert_to_Image:
+        
+        if self.llm_model=='clip-flant5-xxl' or self.llm_model=='llava-v1.5-13b':
             curr_images_convert = []
             for i in curr_images:
                 if i.dtype != torch.uint8:
                     i = i.to(torch.uint8)
                 curr_images_convert.append(Image.fromarray(i.numpy()))
             score = self.clip_flant5_score(images=curr_images_convert, texts=text_command)
-        else:
-
+        elif self.llm_model=='gpt-4o':
             score = self.clip_flant5_score(images=curr_images, texts=text_command)
-           
-
-
-            # print("test")
+                
             # curr_images = ["/home/kangnil/pulse/output/renderings/clip_similarity/223-0-ACCAD_Male2Running_c3d_C24 - quick sidestep left_poses/0_-9.png"]
             # score = self.clip_flant5_score(images=curr_images, texts=text_command)
+        else:
+            print("check----------------------------------------------------------")
+
+
+
  
         return score
 
