@@ -44,7 +44,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
 
       
         #self.clip_flant5_score = t2v_metrics.VQAScore(model='clip-flant5-xxl')  # our recommended scoring model
-        openai_key = "sk-wJkfrJaSUuzZ0TzipMbwPj9_TzHVpFFirz6cnD1-RtT3BlbkFJ3OUqPiTorSxZgkJHINdkzzeHQ1u6ZVLz81p5pGEX0A"
+        
         self.clip_flant5_score = t2v_metrics.get_score_model(model="gpt-4o", device="cuda", openai_key=openai_key, top_logprobs=20)
             
 
