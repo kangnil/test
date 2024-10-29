@@ -1,11 +1,12 @@
-from typing import List
+from typing import List, Union
 import os
 import torch
 from openai import OpenAI
 import base64
 import tiktoken
-
+from PIL import Image
 from .vqa_model import VQAScoreModel
+import io
 
 default_question_template = 'Does this figure show "{}"? Please answer yes or no.'
 default_answer_template = 'Yes'
@@ -18,8 +19,22 @@ GPT4V_MODELS = {
 
 # Function to encode the image
 def encode_image(image_path):
-  with open(image_path, "rb") as image_file:
-    return base64.b64encode(image_file.read()).decode('utf-8')
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+ 
+def tensor_to_base64(tensor):
+    """Convert a tensor of image data to a base64 encoded string."""
+    # Convert tensor to PIL Image
+    img = Image.fromarray(tensor.numpy().astype('uint8'))
+    
+    # Convert PIL Image to bytes
+    buffered = io.BytesIO()
+    img.save(buffered, format="png")  # Choose format accordingly, e.g., PNG, JPEG
+    img_bytes = buffered.getvalue()
+    
+    # Encode image bytes to base64 string
+    return base64.b64encode(img_bytes).decode('utf-8')
+
 
 def get_image_type(image_path):
     image_type = image_path.split('.')[-1]
@@ -57,10 +72,15 @@ class GPT4VModel(VQAScoreModel):
         #     self.candidate_tokens.append(token[0])
 
     def load_images(self,
-                    image: List[str]) -> torch.Tensor:
+                    image: List[Union[str, torch.Tensor]]) -> torch.Tensor:
         """Load the image(s), and return the string
         """
-        image = [{'path': img, 'type': get_image_type(img), 'base64': encode_image(img)} for img in image]
+        if isinstance(image[0], str):
+            image = [{'path': img, 'type': get_image_type(img), 'base64': encode_image(img)} for img in image]
+        elif isinstance(image[0], torch.Tensor):
+            image = [{'type': 'jpeg', 'base64': tensor_to_base64(img)} for img in image]
+        else:
+            print(type(image[0]), " doesn't work  -------------------------------------------------------")
         return image
     
     def forward_single(self, image, question, answer):
@@ -89,6 +109,7 @@ class GPT4VModel(VQAScoreModel):
                 # logit_bias={yes_token:50, no_token:50}
             )
         except:
+
             print(f"Warning: completion not generated for image: {image['path']} and question: {question} and answer: {answer}")
             print(f"Trying again with the same image")
             try:
@@ -113,7 +134,7 @@ class GPT4VModel(VQAScoreModel):
     # @torch.no_grad()
     # @torch.autocast(device_type='cuda', dtype=torch.bfloat16)
     def forward(self,
-                images: List[str],
+                images: List[Union[str, torch.Tensor]],
                 texts: List[str],
                 question_template: str=default_question_template,
                 answer_template: str=default_answer_template) -> torch.Tensor:
@@ -130,9 +151,13 @@ class GPT4VModel(VQAScoreModel):
             ans_tokens = self.tokenizer.encode(ans)
             assert len(ans_tokens) == 1, "Currently only support single token answers"
 
-        images = self.load_images(images)
+
         
+        images = self.load_images(images)
+
+
         lm_prob = torch.zeros(len(images))
+ 
         
         for idx, (image, question, answer) in enumerate(zip(images, questions, answers)):
             lm_prob[idx] = self.forward_single(image, question, answer)

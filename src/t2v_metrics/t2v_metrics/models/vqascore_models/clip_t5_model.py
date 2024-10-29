@@ -217,26 +217,15 @@ class CLIPT5Model(VQAScoreModel):
 
     def load_images(self, image: List[Union[str, Image.Image]]) -> torch.Tensor:
         """Load the image(s), and return a tensor (after preprocessing) put on self.device."""
-        processed_images = []
-        for img in image:
-            if isinstance(img, str):
-                # Load image from file path
-                img = self.image_loader(img)
-            elif isinstance(img, Image.Image):
-                # Image is already loaded, continue directly
-                pass
-            else:
-                raise TypeError(f"Unsupported image type: {type(img)}. Expected str or PIL.Image.Image.")
-
-            # Preprocess the image
-            img = self.image_preprocess(img)
-            processed_images.append(img)
-
-        # Ensure all images have the same shape
-        assert all(x.shape == processed_images[0].shape for x in processed_images)
-        # Stack images into a batch and move to the desired device
-        image_tensor = torch.stack(processed_images, dim=0).to(self.device)
-        return image_tensor
+        if isinstance(image[0], str):
+            image = [self.image_loader(x) for x in image]
+        
+        if self.image_aspect_ratio == 'pad':
+            image = [expand2square(image, tuple(int(x*255) for x in self.image_processor.image_mean)) for image in image]
+        image = [self.image_processor.preprocess(image, return_tensors='pt')['pixel_values'][0] for image in image]
+        assert all(x.shape == image[0].shape for x in image)
+        image = torch.stack(image, dim=0).to(self.device)
+        return image
 
     @torch.no_grad()
     @torch.autocast(device_type='cuda', dtype=torch.bfloat16)

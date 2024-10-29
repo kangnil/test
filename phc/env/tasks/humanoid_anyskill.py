@@ -42,8 +42,11 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         if self.RENDER:
             self._init_camera()
 
-        if self.num_envs>256:
-            self.clip_flant5_score = t2v_metrics.VQAScore(model='clip-flant5-xxl')  # our recommended scoring model
+      
+        #self.clip_flant5_score = t2v_metrics.VQAScore(model='clip-flant5-xxl')  # our recommended scoring model
+        openai_key = "sk-wJkfrJaSUuzZ0TzipMbwPj9_TzHVpFFirz6cnD1-RtT3BlbkFJ3OUqPiTorSxZgkJHINdkzzeHQ1u6ZVLz81p5pGEX0A"
+        self.clip_flant5_score = t2v_metrics.get_score_model(model="gpt-4o", device="cuda", openai_key=openai_key, top_logprobs=20)
+            
 
         self.text_command = cfg["env"].get("text_command", "a person is running")
 
@@ -206,64 +209,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
 
         return
 
-    # def _draw_task(self):
-    #     self._update_marker()
-    #     return
-    # def _update_marker(self):
-    #     if flags.show_traj:
-    #
-    #         motion_times = (self.progress_buf + 1) * self.dt + self._motion_start_times #+ self._motion_start_times_offset  # + 1 for target.
-    #         motion_res = self._get_state_from_motionlib_cache(self._sampled_motion_ids, motion_times,
-    #                                                           self._global_offset)
-    #         root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, smpl_params, limb_weights, pose_aa, ref_rb_pos, ref_rb_rot, ref_body_vel, ref_body_ang_vel = \
-    #             motion_res["root_pos"], motion_res["root_rot"], motion_res["dof_pos"], motion_res["root_vel"], \
-    #             motion_res["root_ang_vel"], motion_res["dof_vel"], \
-    #                 motion_res["motion_bodies"], motion_res["motion_limb_weights"], motion_res["motion_aa"], motion_res[
-    #                 "rg_pos"], motion_res["rb_rot"], motion_res["body_vel"], motion_res["body_ang_vel"]
-    #
-    #     #     self._marker_pos[:] = ref_rb_pos
-    #     #     # self._marker_rotation[..., self._track_bodies_id, :] = ref_rb_rot[..., self._track_bodies_id, :]
-    #     #
-    #     #     ## Only update the tracking points.
-    #     #     if flags.real_traj:
-    #     #         self._marker_pos[:] = 1000
-    #     #
-    #     #     self._marker_pos[..., self._track_bodies_id, :] = ref_rb_pos[..., self._track_bodies_id, :]
-    #     #
-    #     #     if self._occl_training:
-    #     #         self._marker_pos[self.random_occlu_idx] = 0
-    #     #
-    #     # else:
-    #     #     self._marker_pos[:] = 1000
-    #     #
-    #     # # ######### Heading debug #######
-    #     # # points = self.init_root_points()
-    #     # # base_quat = self._rigid_body_rot[0, 0:1]
-    #     # # base_quat = remove_base_rot(base_quat)
-    #     # # heading_rot = torch_utils.calc_heading_quat(base_quat)
-    #     # # show_points = quat_apply(heading_rot.repeat(1, points.shape[0]).reshape(-1, 4), points) + (self._rigid_body_pos[0, 0:1]).unsqueeze(1)
-    #     # # self._marker_pos[:] = show_points[:, :self._marker_pos.shape[1]]
-    #     # # ######### Heading debug #######
-    #     #
-    #     # self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._root_states),
-    #     #                                              gymtorch.unwrap_tensor(self._marker_actor_ids),
-    #     #                                              len(self._marker_actor_ids))
-    #     return
-
-    # def get_task_obs_size(self):
-    #     obs_size = 0
-    #     if (self._enable_task_obs):
-    #         obs_size = 512
-    #
-    #     # if (self._add_input_noise):
-    #     #     obs_size += 16
-    #     #
-    #     # if self.obs_v == 2:
-    #     #     obs_size *= self.past_track_steps
-    #
-    #     return obs_size
-
-
+ 
     def pre_physics_step(self, actions):
         super().pre_physics_step(actions)
         self._prev_root_pos[:] = self._humanoid_root_states[..., 0:3]
@@ -278,48 +224,37 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         return
 
     def compute_vqascore_reward(self, curr_images, text_command):
-        score = self.clip_flant5_score(images=curr_images, texts=text_command)
+        convert_to_Image = False
+        if convert_to_Image:
+            curr_images_convert = []
+            for i in curr_images:
+                if i.dtype != torch.uint8:
+                    i = i.to(torch.uint8)
+                curr_images_convert.append(Image.fromarray(i.numpy()))
+            score = self.clip_flant5_score(images=curr_images_convert, texts=text_command)
+        else:
+
+            score = self.clip_flant5_score(images=curr_images, texts=text_command)
+           
+
+
+            # print("test")
+            # curr_images = ["/home/kangnil/pulse/output/renderings/clip_similarity/223-0-ACCAD_Male2Running_c3d_C24 - quick sidestep left_poses/0_-9.png"]
+            # score = self.clip_flant5_score(images=curr_images, texts=text_command)
+ 
         return score
 
 
     def _compute_reward(self, actions):
-        vqascore_rewards  = torch.zeros([self.num_envs], device=self.device, dtype=torch.float32)
-        if self.num_envs>256:
-            vqascore_rewards = self.compute_vqascore_reward(self.curr_images, self.text_command)
+        #vqascore_rewards  = torch.zeros([self.num_envs], device=self.device, dtype=torch.float32)
+
+
+        vqascore_rewards = self.compute_vqascore_reward(self.curr_images, self.text_command).squeeze(dim=1)
         self.rew_buf[:] = self.reward_raw = vqascore_rewards
         self.reward_raw = self.reward_raw[:, None]
 
         return
-
-
-    
-    # def _reset_ref_state_init(self, env_ids):
-    #     super()._reset_ref_state_init(env_ids)
-    #     self.power_acc[env_ids] = 0
-    
-    # def _sample_ref_state(self, env_ids):
-    #     motion_ids, motion_times, root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, rb_pos, rb_rot, body_vel, body_ang_vel  = super()._sample_ref_state(env_ids)
-    #
-    #     # ZL Hack: Forcing to always be facing the x-direction.
-    #     if not self._has_upright_start:
-    #         heading_rot_inv = torch_utils.calc_heading_quat_inv(humanoid_amp.remove_base_rot(root_rot))
-    #     else:
-    #         heading_rot_inv = torch_utils.calc_heading_quat_inv(root_rot)
-    #
-    #
-    #
-    #     heading_rot_inv_repeat = heading_rot_inv[:, None].repeat(1, len(self._body_names), 1)
-    #     root_rot = quat_mul(heading_rot_inv, root_rot).clone()
-    #     rb_pos = quat_apply(heading_rot_inv_repeat, rb_pos - root_pos[:, None, :]).clone() + root_pos[:, None, :]
-    #     rb_rot = quat_mul(heading_rot_inv_repeat, rb_rot).clone()
-    #     root_ang_vel = quat_apply(heading_rot_inv, root_ang_vel).clone()
-    #     root_vel = quat_apply(heading_rot_inv, root_vel).clone()
-    #     body_vel = quat_apply(heading_rot_inv_repeat, body_vel).clone()
-    #
-    #     return motion_ids, motion_times, root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, rb_pos, rb_rot, body_vel, body_ang_vel
-    #
-
-
+ 
 class HumanoidAnyskillZ(HumanoidAnyskill):
     def __init__(self, cfg, sim_params, physics_engine, device_type, device_id, headless):
         super().__init__(cfg=cfg, sim_params=sim_params, physics_engine=physics_engine, device_type=device_type, device_id=device_id, headless=headless)
@@ -360,24 +295,24 @@ class HumanoidAnyskillZ(HumanoidAnyskill):
 
 
 
-@torch.jit.script
-def compute_speed_reward(root_pos, prev_root_pos, root_rot, tar_speed, dt):
-    # type: (Tensor, Tensor, Tensor, Tensor, float) -> Tensor
-    vel_err_scale = 0.25
-    tangent_err_w = 0.1
+# @torch.jit.script
+# def compute_speed_reward(root_pos, prev_root_pos, root_rot, tar_speed, dt):
+#     # type: (Tensor, Tensor, Tensor, Tensor, float) -> Tensor
+#     vel_err_scale = 0.25
+#     tangent_err_w = 0.1
 
-    delta_root_pos = root_pos - prev_root_pos
-    root_vel = delta_root_pos / dt
-    tar_dir_speed = root_vel[..., 0]
-    tangent_speed = root_vel[..., 1]
+#     delta_root_pos = root_pos - prev_root_pos
+#     root_vel = delta_root_pos / dt
+#     tar_dir_speed = root_vel[..., 0]
+#     tangent_speed = root_vel[..., 1]
 
-    tar_vel_err = tar_speed - tar_dir_speed
-    tangent_vel_err = tangent_speed
-    dir_reward = torch.exp(-vel_err_scale * (tar_vel_err * tar_vel_err +  tangent_err_w * tangent_vel_err * tangent_vel_err))
+#     tar_vel_err = tar_speed - tar_dir_speed
+#     tangent_vel_err = tangent_speed
+#     dir_reward = torch.exp(-vel_err_scale * (tar_vel_err * tar_vel_err +  tangent_err_w * tangent_vel_err * tangent_vel_err))
 
-    vel_reward_w = 0.01
-    reward = dir_reward * vel_reward_w
+#     vel_reward_w = 0.01
+#     reward = dir_reward * vel_reward_w
 
-    return reward
+#     return reward
 
 
