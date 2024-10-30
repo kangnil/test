@@ -42,8 +42,9 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         if self.RENDER:
             self._init_camera()
 
-        self.llm_model = 'clip-flant5-xl'
-        #self.llm_model='llava-v1.5-7b'
+        #self.llm_model = 'clip-flant5-xxl'
+        self.llm_model='llava-v1.5-13b'
+        self.llm_model_device = 'cuda:1'
 
         
         if self.llm_model=='gpt-4o':
@@ -51,7 +52,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
             self.clip_flant5_score = t2v_metrics.get_score_model(model="gpt-4o", device="cuda", openai_key=openai_key, top_logprobs=20)
         elif self.llm_model in ['llava-v1.5-13b', 'llava-v1.5-7b', 'clip-flant5-xxl', 'clip-flant5-xl'] :
             print(self.llm_model, "-----------------------------------------")
-            self.clip_flant5_score = t2v_metrics.VQAScore(model=self.llm_model, device="cuda")
+            self.clip_flant5_score = t2v_metrics.VQAScore(model=self.llm_model, device=self.llm_model_device)
        
         else:
             print("check-----------------------------------------------")
@@ -213,7 +214,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         image_data_np = images.numpy().astype('uint8')
         # Convert numpy array to a PIL Image
         image = Image.fromarray(image_data_np)
-        image.save(f"{self.curr_image_folder_name}/{angle:.1f}.png")
+        image.save(f"{self.curr_image_folder_name}/{self.llm_model}_{angle:.1f}.png")
 
         return
 
@@ -233,16 +234,16 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
 
     def compute_vqascore_reward(self, curr_images, text_command):
 
-        if self.llm_model in ['llava-v1.5-13b' ,'llava-v1.5-7b']:
-            curr_images_convert = []
-            for i in curr_images:
-                if i.dtype != torch.uint8:
-                    i = i.to(torch.uint8)
-                curr_images_convert.append(Image.fromarray(i.numpy()))
-            #print(type(curr_images_convert))
-            score = self.clip_flant5_score(images=curr_images_convert, texts=text_command) 
-            print(score[0])
-        elif self.llm_model in ['clip-flant5-xl', 'clip-flant5-xxl'] :
+        # if self.llm_model in []:
+        #     curr_images_convert = []
+        #     for i in curr_images:
+        #         if i.dtype != torch.uint8:
+        #             i = i.to(torch.uint8)
+        #         curr_images_convert.append(Image.fromarray(i.numpy()))
+        #     #print(type(curr_images_convert))
+        #     score = self.clip_flant5_score(images=curr_images_convert, texts=text_command) 
+        #     print(score[0])
+        if self.llm_model in ['clip-flant5-xl', 'clip-flant5-xxl','llava-v1.5-13b' ,'llava-v1.5-7b']:
             dataset = [ {'images': list(curr_images.unbind(0)), 'texts': [text_command]} ]
             score = self.clip_flant5_score.batch_forward(dataset=dataset, batch_size=256).squeeze(0) # (n_sample, 4, 1) tensor
             self.save_pil(curr_images[0], score[0].item())
@@ -265,7 +266,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
 
 
         vqascore_rewards = self.compute_vqascore_reward(self.curr_images, self.text_command).squeeze(dim=1)
-        self.rew_buf[:] = self.reward_raw = vqascore_rewards
+        self.rew_buf[:] = self.reward_raw = vqascore_rewards.to(self.device)
         self.reward_raw = self.reward_raw[:, None]
 
         return
