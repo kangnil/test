@@ -42,17 +42,17 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         if self.RENDER:
             self._init_camera()
 
-        #self.llm_model = 'clip-flant5-xxl'
-        self.llm_model='llava-v1.5-13b'
+        self.llm_model = 'clip-flant5-xl'
+        #self.llm_model='llava-v1.5-7b'
 
         
         if self.llm_model=='gpt-4o':
             openai_key = "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"
             self.clip_flant5_score = t2v_metrics.get_score_model(model="gpt-4o", device="cuda", openai_key=openai_key, top_logprobs=20)
-        elif self.llm_model=='llava-v1.5-13b':
-            self.clip_flant5_score = t2v_metrics.VQAScore(model='llava-v1.5-13b')
-        elif self.llm_model=='clip-flant5-xxl':  
-            self.clip_flant5_score = t2v_metrics.VQAScore(model='clip-flant5-xxl')  # our recommended scoring model
+        elif self.llm_model in ['llava-v1.5-13b', 'llava-v1.5-7b', 'clip-flant5-xxl', 'clip-flant5-xl'] :
+            print(self.llm_model, "-----------------------------------------")
+            self.clip_flant5_score = t2v_metrics.VQAScore(model=self.llm_model, device="cuda")
+       
         else:
             print("check-----------------------------------------------")
 
@@ -209,11 +209,11 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
             img.save(temp_image_path, format="PNG")
         return
 
-    def save_pil(self, images, angle="0"):
-        image_data_np = images[0].numpy().astype('uint8')
+    def save_pil(self, images, angle):
+        image_data_np = images.numpy().astype('uint8')
         # Convert numpy array to a PIL Image
         image = Image.fromarray(image_data_np)
-        image.save(f"{self.curr_image_folder_name}/{self.curr_stpes}_{angle}.png")
+        image.save(f"{self.curr_image_folder_name}/{angle:.1f}.png")
 
         return
 
@@ -232,14 +232,20 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         return
 
     def compute_vqascore_reward(self, curr_images, text_command):
-        
-        if self.llm_model=='clip-flant5-xxl' or self.llm_model=='llava-v1.5-13b':
+
+        if self.llm_model in ['llava-v1.5-13b' ,'llava-v1.5-7b']:
             curr_images_convert = []
             for i in curr_images:
                 if i.dtype != torch.uint8:
                     i = i.to(torch.uint8)
                 curr_images_convert.append(Image.fromarray(i.numpy()))
-            score = self.clip_flant5_score(images=curr_images_convert, texts=text_command)
+            #print(type(curr_images_convert))
+            score = self.clip_flant5_score(images=curr_images_convert, texts=text_command) 
+            print(score[0])
+        elif self.llm_model in ['clip-flant5-xl', 'clip-flant5-xxl'] :
+            dataset = [ {'images': list(curr_images.unbind(0)), 'texts': [text_command]} ]
+            score = self.clip_flant5_score.batch_forward(dataset=dataset, batch_size=256).squeeze(0) # (n_sample, 4, 1) tensor
+            self.save_pil(curr_images[0], score[0].item())
         elif self.llm_model=='gpt-4o':
             score = self.clip_flant5_score(images=curr_images, texts=text_command)
                 
@@ -283,8 +289,6 @@ class HumanoidAnyskillZ(HumanoidAnyskill):
         if self.RENDER:
             angle = random.randint(-90, 90)
             self.curr_images = self.render_img(angle)
-            if self.SAVE_RENDER:
-                self.save_pil(self.curr_images, angle)
             if self.SAVE_O3D_RENDER:
                 self.save_o3d(angle)
 

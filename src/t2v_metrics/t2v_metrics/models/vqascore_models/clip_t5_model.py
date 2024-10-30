@@ -215,11 +215,18 @@ class CLIPT5Model(VQAScoreModel):
     #     image = torch.stack(image, dim=0).to(self.device)
     #     return image
 
-    def load_images(self, image: List[Union[str, Image.Image]]) -> torch.Tensor:
+    def load_images(self, image: List[Union[str, Image.Image, torch.Tensor]]) -> torch.Tensor:
         """Load the image(s), and return a tensor (after preprocessing) put on self.device."""
         if isinstance(image[0], str):
             image = [self.image_loader(x) for x in image]
-        
+        elif isinstance(image[0], torch.Tensor):
+            curr_images_convert = []
+            for i in image:
+                if i.dtype != torch.uint8:
+                    i = i.to(torch.uint8)
+            curr_images_convert.append(Image.fromarray(i.numpy()))
+            image = curr_images_convert
+
         if self.image_aspect_ratio == 'pad':
             image = [expand2square(image, tuple(int(x*255) for x in self.image_processor.image_mean)) for image in image]
         image = [self.image_processor.preprocess(image, return_tensors='pt')['pixel_values'][0] for image in image]
@@ -230,7 +237,7 @@ class CLIPT5Model(VQAScoreModel):
     @torch.no_grad()
     @torch.autocast(device_type='cuda', dtype=torch.bfloat16)
     def forward(self,
-                images: List[Union[str, Image.Image]],
+                images: List[Union[str, Image.Image, torch.Tensor]],
                 texts: List[str],
                 question_template: str=default_question_template,
                 answer_template: str=default_answer_template) -> torch.Tensor:
