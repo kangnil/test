@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import List, TypedDict, Union
+from typing import List, TypedDict, Union, Dict
 from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
@@ -58,34 +58,27 @@ class Score(nn.Module):
         return scores
     
     def batch_forward(self,
-                      dataset: List[ImageTextDict],
+                      dataset_image: torch.Tensor,
+                      dataset_text: str,
                       batch_size: int=16,
                       **kwargs) -> torch.Tensor:
         """Return the similarity score(s) between the image(s) and the text(s)
         If there are m images and n texts, return a m x n tensor
         """
-        num_samples = len(dataset)
-        num_images = len(dataset[0]['images'])
-        num_texts = len(dataset[0]['texts'])
-        scores = torch.zeros(num_samples, num_images, num_texts).to(self.device)
-        
-        
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        # num_samples = len(dataset)
+        num_images =dataset_image.shape[0]
+        # num_texts = len(dataset[0]['texts'])
+        scores = torch.zeros(num_images, 1).to(self.device)
+ 
+        dataloader = DataLoader(dataset_image, batch_size=batch_size, shuffle=False)
         counter = 0
+
+         
         for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
-            cur_batch_size = len(batch['images'][0])
-            assert len(batch['images']) == num_images, \
-                f"Number of image options in batch {batch_idx} is {len(batch['images'])}. Expected {num_images} images."
-            assert len(batch['texts']) == num_texts, \
-                f"Number of text options in batch {batch_idx} is {len(batch['texts'])}. Expected {num_texts} texts."
-            
-            for image_idx in range(num_images):
-                images = batch['images'][image_idx]
-                for text_idx in range(num_texts):
-                    texts = batch['texts'][text_idx]
-                    scores[counter:counter+cur_batch_size, image_idx, text_idx] = \
-                        self.model.forward(images, texts, **kwargs)
-            
+            cur_batch_size = batch.shape[0]
+            all_images = list(batch.unbind(0))
+            all_texts = [dataset_text] * len(all_images)  
+            combined_scores = self.model.forward(all_images, all_texts, **kwargs)  # Output: (cur_batch_size * num_images,)
+            scores[counter:counter + cur_batch_size, :] = combined_scores.unsqueeze(1)
             counter += cur_batch_size
         return scores
-    

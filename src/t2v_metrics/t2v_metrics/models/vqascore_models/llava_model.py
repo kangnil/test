@@ -212,7 +212,7 @@ class LLaVAModel(VQAScoreModel):
             for i in image:
                 if i.dtype != torch.uint8:
                     i = i.to(torch.uint8)
-            curr_images_convert.append(Image.fromarray(i.numpy()))
+                curr_images_convert.append(Image.fromarray(i.numpy()))
             image = curr_images_convert
         if self.image_aspect_ratio == 'pad':
             image = [expand2square(image, tuple(int(x*255) for x in self.image_processor.image_mean)) for image in image]

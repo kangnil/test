@@ -42,8 +42,8 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         if self.RENDER:
             self._init_camera()
 
-        #self.llm_model = 'clip-flant5-xxl'
-        self.llm_model='llava-v1.5-13b'
+        self.llm_model = 'clip-flant5-xxl'
+        #self.llm_model='llava-v1.5-13b'
         self.llm_model_device = 'cuda:1'
 
         
@@ -244,8 +244,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         #     score = self.clip_flant5_score(images=curr_images_convert, texts=text_command) 
         #     print(score[0])
         if self.llm_model in ['clip-flant5-xl', 'clip-flant5-xxl','llava-v1.5-13b' ,'llava-v1.5-7b']:
-            dataset = [ {'images': list(curr_images.unbind(0)), 'texts': [text_command]} ]
-            score = self.clip_flant5_score.batch_forward(dataset=dataset, batch_size=256).squeeze(0) # (n_sample, 4, 1) tensor
+            score = self.clip_flant5_score.batch_forward(dataset_image=curr_images, dataset_text=text_command, batch_size=32) # (n_sample, 4, 1) tensor
             self.save_pil(curr_images[0], score[0].item())
         elif self.llm_model=='gpt-4o':
             score = self.clip_flant5_score(images=curr_images, texts=text_command)
