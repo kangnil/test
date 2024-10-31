@@ -42,10 +42,10 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         if self.RENDER:
             self._init_camera()
 
-        self.llm_model = 'clip-flant5-xxl'
-        #self.llm_model='llava-v1.5-13b'
-        self.llm_model_device = 'cuda:1'
-
+       
+        self.llm_model = cfg["env"].get("llm_model", 'clip-flant5-xxl')
+        self.llm_model_device =cfg["env"].get("llm_model_device", 'cuda:0')
+        self.llm_model_batchsize = cfg["env"].get("llm_model_batchsize", 32)
         
         if self.llm_model=='gpt-4o':
             openai_key = "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"
@@ -53,7 +53,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         elif self.llm_model in ['llava-v1.5-13b', 'llava-v1.5-7b', 'clip-flant5-xxl', 'clip-flant5-xl'] :
             print(self.llm_model, "-----------------------------------------")
             self.clip_flant5_score = t2v_metrics.VQAScore(model=self.llm_model, device=self.llm_model_device)
-       
+            #self.clip_flant5_score = t2v_metrics.VQAScore(model=self.llm_model, device='cuda')
         else:
             print("check-----------------------------------------------")
 
@@ -214,7 +214,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         image_data_np = images.numpy().astype('uint8')
         # Convert numpy array to a PIL Image
         image = Image.fromarray(image_data_np)
-        image.save(f"{self.curr_image_folder_name}/{self.llm_model}_{angle:.1f}.png")
+        image.save(f"{self.curr_image_folder_name}/{self.llm_model}_{angle:.2f}.png")
 
         return
 
@@ -244,7 +244,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         #     score = self.clip_flant5_score(images=curr_images_convert, texts=text_command) 
         #     print(score[0])
         if self.llm_model in ['clip-flant5-xl', 'clip-flant5-xxl','llava-v1.5-13b' ,'llava-v1.5-7b']:
-            score = self.clip_flant5_score.batch_forward(dataset_image=curr_images, dataset_text=text_command, batch_size=32) # (n_sample, 4, 1) tensor
+            score = self.clip_flant5_score.batch_forward(dataset_image=curr_images, dataset_text=text_command, batch_size=self.llm_model_batchsize) # (n_sample, 4, 1) tensor
             self.save_pil(curr_images[0], score[0].item())
         elif self.llm_model=='gpt-4o':
             score = self.clip_flant5_score(images=curr_images, texts=text_command)
