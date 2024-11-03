@@ -24,6 +24,7 @@ from src.t2v_metrics import t2v_metrics
 
 class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
     def __init__(self, cfg, sim_params, physics_engine, device_type, device_id, headless):
+        self.viewer_follow_root = False
         super().__init__(cfg=cfg,
                          sim_params=sim_params,
                          physics_engine=physics_engine,
@@ -31,7 +32,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                          device_id=device_id,
                          headless=headless)
         self.llm_model = cfg["env"].get("llm_model", 'clip-flant5-xxl')
-        self.llm_model_device =cfg["env"].get("llm_model_device", 'cuda:0')
+        self.llm_model_device = cfg["env"].get("llm_model_device", 'cuda:0')
         self.llm_model_batchsize = cfg["env"].get("llm_model_batchsize", 32)
         self.text_command = cfg["env"].get("text_command", "a person is running")
 
@@ -41,25 +42,24 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         self.curr_stpes = 0
         self._render_image_path = rendering_out
         self.RENDER = True
-        self.SAVE_RENDER = True
+        self.SAVE_RENDER = False
         self.SAVE_O3D_RENDER = False
         self._enable_task_obs = False
-        self.viewer_follow_root = False
-        if self.RENDER:
-            self._init_camera()
 
-       
 
-        
-        if self.llm_model=='gpt-4o':
-            openai_key = "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"
-            self.clip_flant5_score = t2v_metrics.get_score_model(model="gpt-4o", device="cuda", openai_key=openai_key, top_logprobs=20)
-        elif self.llm_model in ['llava-v1.5-13b', 'llava-v1.5-7b', 'clip-flant5-xxl', 'clip-flant5-xl'] :
-            print(self.llm_model, "-----------------------------------------")
-            self.clip_flant5_score = t2v_metrics.VQAScore(model=self.llm_model, device=self.llm_model_device)
-            #self.clip_flant5_score = t2v_metrics.VQAScore(model=self.llm_model, device='cuda')
-        else:
-            print("check-----------------------------------------------")
+
+        self._init_camera()
+
+        if self.num_envs>16:
+            if self.llm_model=='gpt-4o':
+                openai_key = "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"
+                self.clip_flant5_score = t2v_metrics.get_score_model(model="gpt-4o", device="cuda", openai_key=openai_key, top_logprobs=20)
+            elif self.llm_model in ['llava-v1.5-13b', 'llava-v1.5-7b', 'clip-flant5-xxl', 'clip-flant5-xl'] :
+                print(self.llm_model, "-----------------------------------------")
+                self.clip_flant5_score = t2v_metrics.VQAScore(model=self.llm_model, device=self.llm_model_device)
+                #self.clip_flant5_score = t2v_metrics.VQAScore(model=self.llm_model, device='cuda')
+            else:
+                print("check-----------------------------------------------")
 
         
         # self._speed_change_steps = torch.zeros([self.num_envs], device=self.device, dtype=torch.int64)
@@ -261,10 +261,13 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
 
 
     def _compute_reward(self, actions):
-        #vqascore_rewards  = torch.zeros([self.num_envs], device=self.device, dtype=torch.float32)
+        if self.num_envs>16:
+            vqascore_rewards = self.compute_vqascore_reward(self.curr_images, self.text_command).squeeze(dim=1)
+        else:
+            vqascore_rewards  = torch.zeros([self.num_envs], device=self.device, dtype=torch.float32)
 
 
-        vqascore_rewards = self.compute_vqascore_reward(self.curr_images, self.text_command).squeeze(dim=1)
+
         self.rew_buf[:] = self.reward_raw = vqascore_rewards.to(self.device)
         self.reward_raw = self.reward_raw[:, None]
 
