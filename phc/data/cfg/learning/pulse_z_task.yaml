@@ -58,8 +58,8 @@ params:
     lr_schedule: constant
     score_to_win: 20000
     max_epochs: 10000000
-    save_best_after: 100
-    save_frequency: 500
+    save_best_after: 10
+    save_frequency: 10
     print_stats: False
     save_intermediate: True
     entropy_coef: 0.0
@@ -68,7 +68,7 @@ params:
     ppo: True
     e_clip: 0.2
     horizon_length: 32
-    minibatch_size: 16384
+    minibatch_size: 256
     mini_epochs: 6
     critic_coef: 5
     clip_value: False
@@ -78,8 +78,8 @@ params:
     amp_obs_demo_buffer_size: 200000
     amp_replay_buffer_size: 200000
     amp_replay_keep_prob: 0.01
-    amp_batch_size: 512
-    amp_minibatch_size: 4096
+    amp_batch_size: 256
+    amp_minibatch_size: 256
     disc_coef: 5
     disc_logit_reg: 0.01
     disc_grad_penalty: 5

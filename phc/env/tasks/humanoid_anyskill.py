@@ -30,7 +30,13 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                          device_type=device_type,
                          device_id=device_id,
                          headless=headless)
-        rendering_out = os.path.join("output", "renderings", "clip_similarity")
+        self.llm_model = cfg["env"].get("llm_model", 'clip-flant5-xxl')
+        self.llm_model_device =cfg["env"].get("llm_model_device", 'cuda:0')
+        self.llm_model_batchsize = cfg["env"].get("llm_model_batchsize", 32)
+        self.text_command = cfg["env"].get("text_command", "a person is running")
+
+
+        rendering_out = os.path.join("output", "renderings", self.text_command, self.llm_model)
         os.makedirs(rendering_out, exist_ok=True)
         self.curr_stpes = 0
         self._render_image_path = rendering_out
@@ -43,9 +49,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
             self._init_camera()
 
        
-        self.llm_model = cfg["env"].get("llm_model", 'clip-flant5-xxl')
-        self.llm_model_device =cfg["env"].get("llm_model_device", 'cuda:0')
-        self.llm_model_batchsize = cfg["env"].get("llm_model_batchsize", 32)
+
         
         if self.llm_model=='gpt-4o':
             openai_key = "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"
@@ -57,8 +61,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         else:
             print("check-----------------------------------------------")
 
-        self.text_command = cfg["env"].get("text_command", "a person is running")
-
+        
         # self._speed_change_steps = torch.zeros([self.num_envs], device=self.device, dtype=torch.int64)
         self._prev_root_pos = torch.zeros([self.num_envs, 3], device=self.device, dtype=torch.float)
         self._tar_speed = 0.2 * torch.ones([self.num_envs], device=self.device, dtype=torch.float)
@@ -150,9 +153,6 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
 
 
     def _build_env(self, env_id, env_ptr, humanoid_asset):
-
-        # set camera handles
-        # set 1024 cameras in the same location?????
         camera_handle = self.gym.create_camera_sensor(env_ptr, self.camera_props)
         self.gym.set_camera_location(camera_handle, env_ptr, gymapi.Vec3(1.2, 1.3, 0.5), gymapi.Vec3(-0.5, 0.7, -0.5))
         self.camera_handles.append(camera_handle)

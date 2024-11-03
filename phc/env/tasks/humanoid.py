@@ -782,7 +782,7 @@ class Humanoid(BaseTask):
 
             if self.has_shape_variation:
                 queue = mp.Queue()
-                num_jobs = min(mp.cpu_count(), 64)
+                num_jobs = 1 #min(mp.cpu_count(), 64)
                 if num_jobs <= 8:
                     num_jobs = 1
                 if flags.debug:

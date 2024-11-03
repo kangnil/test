@@ -48,7 +48,11 @@ tarSpeedMax: 5
 speedChangeStepsMin: 100
 speedChangeStepsMax: 200
 enableTaskObs: True
+
 text_command: "kick"
+llm_model : "clip-flant5-xxl"
+llm_model_device: "cuda:2"
+llm_model_batchsize : 32
 
 
 control_mode: "isaac_pd"

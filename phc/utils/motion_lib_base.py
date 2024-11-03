@@ -227,7 +227,7 @@ class MotionLibBase():
 
         manager = mp.Manager()
         queue = manager.Queue()
-        num_jobs = min(mp.cpu_count(), 64)
+        num_jobs = 1 #min(mp.cpu_count(), 64)
 
         if num_jobs <= 8 or not self.multi_thread:
             num_jobs = 1
