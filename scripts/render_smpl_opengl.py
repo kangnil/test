@@ -48,7 +48,7 @@ import cv2
 
 
 def main():
-    device = torch.device('cuda', index=0) if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device('cuda', index=1) if torch.cuda.is_available() else torch.device('cpu')
 
     # Initialize an OpenGL perspective camera.
     # With world coordinates +Y up, +X left and +Z in, the front of the cow is facing the -Z direction.
@@ -61,7 +61,7 @@ def main():
     R = euler_angles_to_matrix(angles, "XYZ").unsqueeze(0)  # Shape (1, 3, 3)
 
     # Define translation for the camera
-    T = torch.tensor([[0, -1, 1.5]], dtype=torch.float32)  # Shape (1, 3)
+    T = torch.tensor([[0, -1, 2]], dtype=torch.float32)  # Shape (1, 3)
     cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T)
 
     # Define the settings for rasterization and shading. Here we set the output image to be of size
