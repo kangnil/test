@@ -53,6 +53,7 @@ text_command: "kick"
 llm_model : "clip-flant5-xxl"
 llm_model_device: "cuda:2"
 llm_model_batchsize : 32
+opengl_render: True
 
 
 control_mode: "isaac_pd"
