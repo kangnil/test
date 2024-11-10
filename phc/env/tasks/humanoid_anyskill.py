@@ -7,6 +7,7 @@
 import os
 import random
 import torch
+import time
 from torchvision import transforms
 import env.tasks.humanoid as humanoid
 import env.tasks.humanoid_amp as humanoid_amp
@@ -21,6 +22,38 @@ from phc.utils.flags import flags
 import open_clip
 from PIL import Image
 from src.t2v_metrics import t2v_metrics
+from pytorch3d.io import load_objs_as_meshes
+from pytorch3d.structures import Meshes, join_meshes_as_scene
+from pytorch3d.renderer import TexturesUV,TexturesVertex
+from pytorch3d.transforms import Rotate, Translate
+from pytorch3d.transforms import euler_angles_to_matrix
+# Data structures and functions for rendering
+from pytorch3d.renderer import (
+    look_at_view_transform,
+    OpenGLPerspectiveCameras,
+    PointLights,
+    DirectionalLights,
+    Materials,
+    RasterizationSettings,
+    MeshRenderer,
+    MeshRasterizer,
+
+)
+from pytorch3d.renderer.mesh.shader import TexturedSoftPhongShader
+from smpl_sim.smpllib.smpl_parser import (
+    SMPL_Parser,
+    SMPLH_Parser,
+    SMPLX_Parser,
+)
+
+import joblib
+from smpl_sim.smpllib.smpl_parser import SMPL_BONE_ORDER_NAMES as joint_names
+from poselib.poselib.skeleton.skeleton3d import SkeletonTree, SkeletonMotion, SkeletonState
+from scipy.spatial.transform import Rotation as sRot
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+import cv2
+
 
 class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
     def __init__(self, cfg, sim_params, physics_engine, device_type, device_id, headless):
@@ -35,20 +68,21 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         self.llm_model_device = cfg["env"].get("llm_model_device", 'cuda:0')
         self.llm_model_batchsize = cfg["env"].get("llm_model_batchsize", 32)
         self.text_command = cfg["env"].get("text_command", "a person is running")
+        self.opengl_render = cfg["env"].get("opengl_render", False)
 
 
         rendering_out = os.path.join("output", "renderings", self.text_command, self.llm_model)
         os.makedirs(rendering_out, exist_ok=True)
         self.curr_stpes = 0
         self._render_image_path = rendering_out
-        self.RENDER = True
+        self.RENDER = False
         self.SAVE_RENDER = False
         self.SAVE_O3D_RENDER = False
         self._enable_task_obs = False
 
 
-
-        self._init_camera()
+        if not self.opengl_render:
+            self._init_camera()
 
         if self.num_envs>16:
             if self.llm_model=='gpt-4o':
@@ -231,7 +265,185 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         #     self._hack_output_motion_target()
 
         return
+    def render_opengl_images(self):
 
+        device = torch.device('cuda', index=1) if torch.cuda.is_available() else torch.device('cpu')
+
+        # Initialize an OpenGL perspective camera.
+        # With world coordinates +Y up, +X left and +Z in, the front of the cow is facing the -Z direction.
+        # So we move the camera by 180 in the azimuth direction so it is facing the front of the cow.
+        # Example: Create a custom rotation (e.g., rotate around X axis by 45 degrees)
+        # Define rotation angles for each axis in radians (e.g., rotate 45 degrees around X-axis)
+        angles = torch.tensor([90, -90, 0], dtype=torch.float32) * (3.14159265 / 180.0)  # Convert degrees to radians
+
+        # Create rotation matrix from Euler angles
+        R = euler_angles_to_matrix(angles, "XYZ").unsqueeze(0)  # Shape (1, 3, 3)
+
+        # Define translation for the camera
+        T = torch.tensor([[0, -1, 2]], dtype=torch.float32)  # Shape (1, 3)
+        cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T)
+
+        # Define the settings for rasterization and shading. Here we set the output image to be of size
+        # 512x512. As we are rendering images for visualization purposes only we will set faces_per_pixel=1
+        # and blur_radius=0.0. Refer to rasterize_meshes.py for explanations of these parameters.
+        raster_settings = RasterizationSettings(
+            image_size=224,
+            blur_radius=0.0,
+            faces_per_pixel=1,
+            bin_size=0
+        )
+
+        # Place a point light in front of the object. As mentioned above, the front of the cow is facing the
+        # -z direction.
+        lights = PointLights(device=device, location=[[0.0, 0.0, 3.0]])
+
+        # Create a phong renderer by composing a rasterizer and a shader. The textured phong shader will
+        # interpolate the texture uv coordinates for each vertex, sample from a texture image and
+        # apply the Phong lighting model
+        renderer = MeshRenderer(
+            rasterizer=MeshRasterizer(
+                cameras=cameras,
+                raster_settings=raster_settings
+            ),
+            shader=TexturedSoftPhongShader(
+                device=device,
+                cameras=cameras,
+                lights=lights
+            )
+        )
+
+
+
+        #############################################
+        if self.opengl_render:
+            if self.humanoid_type in ["smpl", "smplh", "smplx"]:
+                assert (self._rigid_body_rot.shape[0] == 1)
+                if self._has_upright_start:
+                    body_quat = self._rigid_body_rot
+                    root_trans = self._rigid_body_pos[:, 0, :]
+
+                    if self.vis_ref and len(self.ref_motion_cache['dof_pos']) == self.num_envs:
+                        ref_body_quat = self.ref_motion_cache['rb_rot']
+                        ref_root_trans = self.ref_motion_cache['root_pos']
+
+                        body_quat = torch.cat([body_quat, ref_body_quat])
+                        root_trans = torch.cat([root_trans, ref_root_trans])
+
+                    N = body_quat.shape[0]
+                    offset = self.skeleton_trees[0].local_translation[0].cuda()
+                    root_trans_offset = root_trans - offset
+
+                    pose_quat = (sRot.from_quat(body_quat.reshape(-1, 4).numpy()) * self.pre_rot).as_quat().reshape(N,
+                                                                                                                    -1,
+                                                                                                                    4)
+                    new_sk_state = SkeletonState.from_rotation_and_root_translation(self.skeleton_trees[0],
+                                                                                    torch.from_numpy(pose_quat),
+                                                                                    root_trans.cpu(), is_local=False)
+                    local_rot = new_sk_state.local_rotation
+                    pose_aa = sRot.from_quat(local_rot.reshape(-1, 4).numpy()).as_rotvec().reshape(N, -1, 3)
+                    pose_aa = torch.from_numpy(pose_aa[:, self.mujoco_2_smpl, :].reshape(N, -1)).cuda()
+                else:
+                    dof_pos = self._dof_pos
+                    root_trans = self._rigid_body_pos[:, 0, :]
+                    root_rot = self._rigid_body_rot[:, 0, :]
+                    pose_aa = torch.cat([torch_utils.quat_to_exp_map(root_rot), dof_pos], dim=1).reshape(1, -1)
+
+                    if self.vis_ref and len(self.ref_motion_cache['dof_pos']) == self.num_envs:
+                        ref_dof_pos = self.ref_motion_cache['dof_pos']
+                        ref_root_rot = self.ref_motion_cache['rb_rot'][:, 0, :]
+                        ref_root_trans = self.ref_motion_cache['root_pos']
+
+                        ref_pose_aa = torch.cat([torch_utils.quat_to_exp_map(ref_root_rot), ref_dof_pos], dim=1)
+
+                        pose_aa = torch.cat([pose_aa, ref_pose_aa])
+                        root_trans = torch.cat([root_trans, ref_root_trans])
+                    N = pose_aa.shape[0]
+                    offset = self.skeleton_trees[0].local_translation[0].cuda()
+                    root_trans_offset = root_trans - offset
+                    pose_aa = pose_aa.view(N, -1, 3)[:, self.mujoco_2_smpl, :]
+
+                with torch.no_grad():
+                    vertices, joints = self.mesh_parser.get_joints_verts(pose=pose_aa, th_trans=root_trans_offset.cuda())
+
+                faces = torch.from_numpy(self.mesh_parser.faces.astype(np.int32)).to(device)  # 13776,3. min 0 max 6889
+                img = cv2.cvtColor(cv2.imread("scripts/render/nongrey_male_0540.jpg"), cv2.COLOR_BGR2RGB)
+                img = torch.from_numpy(img).float().to(device) / 255.0  # Convert to float and normalize to [0, 1]
+                # create the uv coordinates
+
+                v_uv = np.load("scripts/render/smpl_uv_map.npy")  # Shape (6890, 2)
+                v_uv = torch.from_numpy(v_uv).to(device, dtype=torch.float32)  # Shape (1, 6890, 2)
+
+                # Create a ground plane
+                ground_vertices = torch.tensor([
+                    [-2.0, -2.0, 0.0],
+                    [-2.0, 2.0, 0.0],
+                    [2.0, 2.0, 0.0],
+                    [3.0, -3.0, 0.0]
+                ], device=device).unsqueeze(0).repeat(self.num_envs, 1, 1)   # Shape: (4, 3)
+
+                ground_faces = torch.tensor([
+                    [0, 1, 2],
+                    [0, 2, 3]
+                ], device=device, dtype=torch.int64)  # Shape: (2, 3)
+
+                # Combine SMPL and ground plane vertices and faces
+                combined_vertices = torch.cat([vertices, ground_vertices], dim=0)  # Shape: (6894, 3)
+                ground_face_offset = vertices.shape[0]
+                combined_faces = torch.cat([faces, ground_faces + ground_face_offset],
+                                           dim=0)  # Adjust indices for ground faces
+                # # For ground plane: dummy UVs (since we're not applying a texture)
+                # ground_uvs = torch.tensor([[0, 0], [0, 1], [1, 1], [1, 0]], device=device).float()
+                # combined_uvs = torch.cat([v_uv, ground_uvs], dim=0) # Combine and repeat
+
+                batch = self.num_envs
+                verts_uvs = v_uv.unsqueeze(0).repeat(batch, 1, 1)  # Shape: (1, 6890, 2)
+                faces_uvs = combined_faces.unsqueeze(0).repeat(batch, 1, 1)
+
+                # Shape: (1, 13776, 3)
+                img = img.unsqueeze(0).repeat(batch, 1, 1, 1)
+                textures = TexturesUV(maps=img, faces_uvs=faces_uvs, verts_uvs=verts_uvs)
+                textures = textures.to(device)
+                smpl_mesh = Meshes(
+                    verts=vertices,
+                    faces=faces_uvs,
+                    textures=textures
+                )
+
+                # Create a black texture for the ground plane
+                img_ground = torch.zeros((512, 512, 3), device=device).float()  # A 512x512 black image
+                # Define UV coordinates for the ground plane vertices
+                v_uv_ground = torch.tensor([[0, 0], [0, 1], [1, 1], [1, 0]], device=device).float()  # Simple UV square
+                ground_texture = TexturesUV(maps=img_ground.unsqueeze(0).repeat(batch, 1, 1, 1),
+                                            faces_uvs=ground_faces.unsqueeze(0).repeat(batch, 1, 1),
+                                            verts_uvs=v_uv_ground.unsqueeze(0).repeat(batch, 1, 1))
+
+                ground_mesh = Meshes(verts=ground_vertices.unsqueeze(0).repeat(batch, 1, 1),
+                                     faces=ground_faces.unsqueeze(0).repeat(batch, 1, 1),
+                                     textures=ground_texture)
+
+                # Combine the meshes
+                # Separate SMPL and ground plane meshes
+                smpl_mesh = smpl_mesh.extend(len(ground_mesh))
+                ground_mesh = ground_mesh.extend(len(smpl_mesh))
+
+                # Combine the meshes
+                combined_mesh = join_meshes_as_scene([smpl_mesh, ground_mesh])
+
+                start_time = time.time()
+                renderer = renderer.to(device)
+                images = renderer(combined_mesh)
+
+                end_time = time.time()
+                render_time = end_time - start_time
+
+                print("render time is  ", render_time)
+                plt.figure(dpi=250)
+                plt.imshow(images[0, ..., :3].cpu().numpy())
+                plt.grid("off");
+                plt.axis("off")
+                plt.show()
+                return images
+        return
     def compute_vqascore_reward(self, curr_images, text_command):
 
         # if self.llm_model in []:
@@ -288,7 +500,8 @@ class HumanoidAnyskillZ(HumanoidAnyskill):
             os.makedirs(self.curr_image_folder_name, exist_ok=True)
 
 
-
+        if self.opengl_render:
+            self.curr_images = self.render_opengl_images()
         if self.RENDER:
             angle = random.randint(-90, 90)
             self.curr_images = self.render_img(angle)

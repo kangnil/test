@@ -8,8 +8,8 @@ from skimage.io import imread
 
 # Util function for loading meshes
 from pytorch3d.io import load_objs_as_meshes
-from pytorch3d.structures import Meshes
-from pytorch3d.renderer import TexturesUV
+from pytorch3d.structures import Meshes, join_meshes_as_scene
+from pytorch3d.renderer import TexturesUV,TexturesVertex
 from pytorch3d.transforms import Rotate, Translate
 from pytorch3d.transforms import euler_angles_to_matrix
 # Data structures and functions for rendering
@@ -164,23 +164,68 @@ def main():
 
     # Add batch dimensions as required for TexturesUV
 
-    verts_uvs = v_uv.unsqueeze(0).repeat(256,1,1)  # Shape: (1, 6890, 2)
-    faces_uvs = faces.unsqueeze(0).repeat(256,1,1)
-    vertices = vertices.unsqueeze(0).repeat(256,1,1)
-    faces = faces.unsqueeze(0).repeat(256,1,1)
+    # Create a ground plane
+    ground_vertices = torch.tensor([
+        [-2.0, -2.0, 0.0],
+        [-2.0, 2.0, 0.0],
+        [2.0, 2.0, 0.0],
+        [3.0, -3.0, 0.0]
+    ], device=device)  # Shape: (4, 3)
+
+    ground_faces = torch.tensor([
+        [0, 1, 2],
+        [0, 2, 3]
+    ], device=device, dtype=torch.int64)  # Shape: (2, 3)
+
+    # Combine SMPL and ground plane vertices and faces
+    combined_vertices = torch.cat([vertices, ground_vertices], dim=0)  # Shape: (6894, 3)
+    ground_face_offset = vertices.shape[0]
+    combined_faces = torch.cat([faces, ground_faces + ground_face_offset],
+                               dim=0)  # Adjust indices for ground faces
+    # # For ground plane: dummy UVs (since we're not applying a texture)
+    # ground_uvs = torch.tensor([[0, 0], [0, 1], [1, 1], [1, 0]], device=device).float()
+    # combined_uvs = torch.cat([v_uv, ground_uvs], dim=0) # Combine and repeat
+
+    batch = 2
+    verts_uvs = v_uv.unsqueeze(0).repeat(batch,1,1)  # Shape: (1, 6890, 2)
+    faces_uvs = combined_faces.unsqueeze(0).repeat(batch,1,1)
+    vertices = combined_vertices.unsqueeze(0).repeat(batch,1,1)
+
     # Shape: (1, 13776, 3)
-    img = img.unsqueeze(0).repeat(256,1,1,1)
+    img = img.unsqueeze(0).repeat(batch,1,1,1)
     textures = TexturesUV(maps=img, faces_uvs=faces_uvs, verts_uvs=verts_uvs)
     textures = textures.to(device)
     smpl_mesh = Meshes(
         verts=vertices,
-        faces=faces,
+        faces=faces_uvs,
         textures=textures
     )
 
+    # Create a black texture for the ground plane
+    img_ground = torch.zeros((512, 512, 3), device=device).float()  # A 512x512 black image
+    # Define UV coordinates for the ground plane vertices
+    v_uv_ground = torch.tensor([[0, 0], [0, 1], [1, 1], [1, 0]], device=device).float()  # Simple UV square
+    ground_texture = TexturesUV(maps=img_ground.unsqueeze(0).repeat(batch, 1, 1, 1),
+                                faces_uvs=ground_faces.unsqueeze(0).repeat(batch, 1, 1),
+                                verts_uvs=v_uv_ground.unsqueeze(0).repeat(batch, 1, 1))
+
+
+
+    ground_mesh = Meshes(verts=ground_vertices.unsqueeze(0).repeat(batch, 1, 1),
+                         faces=ground_faces.unsqueeze(0).repeat(batch, 1, 1),
+                         textures=ground_texture)
+
+    # Combine the meshes
+    # Separate SMPL and ground plane meshes
+    smpl_mesh = smpl_mesh.extend(len(ground_mesh))
+    ground_mesh = ground_mesh.extend(len(smpl_mesh))
+
+    # Combine the meshes
+    combined_mesh = join_meshes_as_scene([smpl_mesh, ground_mesh])
+
     start_time=time.time()
     renderer = renderer.to(device)
-    images = renderer(smpl_mesh)
+    images = renderer(combined_mesh)
 
     end_time = time.time()
     render_time = end_time-start_time
