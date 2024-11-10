@@ -1,6 +1,6 @@
 import os
 from random import triangular
-
+import time
 import numpy
 import torch
 import matplotlib.pyplot as plt
@@ -61,14 +61,14 @@ def main():
     R = euler_angles_to_matrix(angles, "XYZ").unsqueeze(0)  # Shape (1, 3, 3)
 
     # Define translation for the camera
-    T = torch.tensor([[0, -1, 2.7]], dtype=torch.float32)  # Shape (1, 3)
+    T = torch.tensor([[0, -1, 1.5]], dtype=torch.float32)  # Shape (1, 3)
     cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T)
 
     # Define the settings for rasterization and shading. Here we set the output image to be of size
     # 512x512. As we are rendering images for visualization purposes only we will set faces_per_pixel=1
     # and blur_radius=0.0. Refer to rasterize_meshes.py for explanations of these parameters.
     raster_settings = RasterizationSettings(
-        image_size=512,
+        image_size=224,
         blur_radius=0.0,
         faces_per_pixel=1,
         bin_size=0
@@ -163,19 +163,29 @@ def main():
     print("Image shape:", img.shape)  # Expected: (H, W, 3)
 
     # Add batch dimensions as required for TexturesUV
-    verts_uvs = v_uv.unsqueeze(0)  # Shape: (1, 6890, 2)
-    faces_uvs = faces.unsqueeze(0)  # Shape: (1, 13776, 3)
 
-    textures = TexturesUV(maps=[img], faces_uvs=faces_uvs, verts_uvs=verts_uvs)
+    verts_uvs = v_uv.unsqueeze(0).repeat(256,1,1)  # Shape: (1, 6890, 2)
+    faces_uvs = faces.unsqueeze(0).repeat(256,1,1)
+    vertices = vertices.unsqueeze(0).repeat(256,1,1)
+    faces = faces.unsqueeze(0).repeat(256,1,1)
+    # Shape: (1, 13776, 3)
+    img = img.unsqueeze(0).repeat(256,1,1,1)
+    textures = TexturesUV(maps=img, faces_uvs=faces_uvs, verts_uvs=verts_uvs)
     textures = textures.to(device)
     smpl_mesh = Meshes(
-        verts=[vertices],
-        faces=[faces],
+        verts=vertices,
+        faces=faces,
         textures=textures
     )
 
+    start_time=time.time()
     renderer = renderer.to(device)
     images = renderer(smpl_mesh)
+
+    end_time = time.time()
+    render_time = end_time-start_time
+
+    print("render time is  ",render_time)
     plt.figure(dpi = 250)
     plt.imshow(images[0, ..., :3].cpu().numpy())
     plt.grid("off");
