@@ -8,6 +8,7 @@ import os
 import random
 import torch
 import time
+import copy
 from torchvision import transforms
 import env.tasks.humanoid as humanoid
 import env.tasks.humanoid_amp as humanoid_amp
@@ -79,7 +80,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         self.SAVE_RENDER = False
         self.SAVE_O3D_RENDER = False
         self._enable_task_obs = False
-
+        self.vis_ref=False
 
         if not self.opengl_render:
             self._init_camera()
@@ -319,6 +320,15 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
             if self.humanoid_type in ["smpl", "smplh", "smplx"]:
                 assert (self._rigid_body_rot.shape[0] == 1)
                 if self._has_upright_start:
+                    self.pre_rot = sRot.from_quat([0.5, 0.5, 0.5, 0.5])
+                    from smpl_sim.smpllib.smpl_joint_names import SMPL_BONE_ORDER_NAMES, SMPLX_BONE_ORDER_NAMES, \
+                        SMPLH_BONE_ORDER_NAMES, SMPL_MUJOCO_NAMES, SMPLH_MUJOCO_NAMES
+
+                    self.mujoco_2_smpl = [self._body_names_orig.index(q) for q in SMPL_BONE_ORDER_NAMES if
+                                          q in self._body_names_orig]
+                    self.mesh_parser = copy.deepcopy(self._motion_lib.mesh_parsers[0])
+                    self.mesh_parser = self.mesh_parser.cuda()
+
                     body_quat = self._rigid_body_rot
                     root_trans = self._rigid_body_pos[:, 0, :]
 
@@ -365,6 +375,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                 with torch.no_grad():
                     vertices, joints = self.mesh_parser.get_joints_verts(pose=pose_aa, th_trans=root_trans_offset.cuda())
 
+                vertices = vertices.to(device)
                 faces = torch.from_numpy(self.mesh_parser.faces.astype(np.int32)).to(device)  # 13776,3. min 0 max 6889
                 img = cv2.cvtColor(cv2.imread("scripts/render/nongrey_male_0540.jpg"), cv2.COLOR_BGR2RGB)
                 img = torch.from_numpy(img).float().to(device) / 255.0  # Convert to float and normalize to [0, 1]
@@ -387,7 +398,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                 ], device=device, dtype=torch.int64)  # Shape: (2, 3)
 
                 # Combine SMPL and ground plane vertices and faces
-                combined_vertices = torch.cat([vertices, ground_vertices], dim=0)  # Shape: (6894, 3)
+                combined_vertices = torch.cat([vertices, ground_vertices], dim=1)  # Shape: (6894, 3)
                 ground_face_offset = vertices.shape[0]
                 combined_faces = torch.cat([faces, ground_faces + ground_face_offset],
                                            dim=0)  # Adjust indices for ground faces
@@ -417,7 +428,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                                             faces_uvs=ground_faces.unsqueeze(0).repeat(batch, 1, 1),
                                             verts_uvs=v_uv_ground.unsqueeze(0).repeat(batch, 1, 1))
 
-                ground_mesh = Meshes(verts=ground_vertices.unsqueeze(0).repeat(batch, 1, 1),
+                ground_mesh = Meshes(verts=ground_vertices,
                                      faces=ground_faces.unsqueeze(0).repeat(batch, 1, 1),
                                      textures=ground_texture)
 
@@ -438,7 +449,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
 
                 print("render time is  ", render_time)
                 plt.figure(dpi=250)
-                plt.imshow(images[0, ..., :3].cpu().numpy())
+                plt.imshow(images[self.num_envs-1, ..., :3].cpu().numpy())
                 plt.grid("off");
                 plt.axis("off")
                 plt.show()
