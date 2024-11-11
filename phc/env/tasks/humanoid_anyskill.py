@@ -289,7 +289,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         # 512x512. As we are rendering images for visualization purposes only we will set faces_per_pixel=1
         # and blur_radius=0.0. Refer to rasterize_meshes.py for explanations of these parameters.
         raster_settings = RasterizationSettings(
-            image_size=224,
+            image_size=512,
             blur_radius=0.0,
             faces_per_pixel=1,
             bin_size=0
@@ -387,69 +387,56 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                 v_uv = np.load("scripts/render/smpl_uv_map.npy")  # Shape (6890, 2)
                 v_uv = torch.from_numpy(v_uv).to(device, dtype=torch.float32)  # Shape (1, 6890, 2)
 
-                # Create a ground plane
-                ground_vertices = torch.tensor([
-                    [-2.0, -2.0, 0.0],
-                    [-2.0, 2.0, 0.0],
-                    [2.0, 2.0, 0.0],
-                    [3.0, -3.0, 0.0]
-                ], device=device).unsqueeze(0).repeat(self.num_envs, 1, 1)   # Shape: (4, 3)
-
-                ground_faces = torch.tensor([
-                    [0, 1, 2],
-                    [0, 2, 3]
-                ], device=device, dtype=torch.int64)  # Shape: (2, 3)
-
-                # Combine SMPL and ground plane vertices and faces
-                combined_vertices = torch.cat([vertices, ground_vertices], dim=1)  # Shape: (6894, 3)
-                ground_face_offset = vertices.shape[0]
-                combined_faces = torch.cat([faces, ground_faces + ground_face_offset],
-                                           dim=0)  # Adjust indices for ground faces
-                # # For ground plane: dummy UVs (since we're not applying a texture)
-                # ground_uvs = torch.tensor([[0, 0], [0, 1], [1, 1], [1, 0]], device=device).float()
-                # combined_uvs = torch.cat([v_uv, ground_uvs], dim=0) # Combine and repeat
-
                 batch = self.num_envs
                 verts_uvs = v_uv.unsqueeze(0).repeat(batch, 1, 1)  # Shape: (1, 6890, 2)
-                faces_uvs = combined_faces.unsqueeze(0).repeat(batch, 1, 1)
+                faces_uvs = faces.unsqueeze(0).repeat(batch, 1, 1)
 
                 # Shape: (1, 13776, 3)
                 img = img.unsqueeze(0).repeat(batch, 1, 1, 1)
                 textures = TexturesUV(maps=img, faces_uvs=faces_uvs, verts_uvs=verts_uvs)
                 textures = textures.to(device)
-                smpl_mesh = Meshes(
+                smpl_meshes = Meshes(
                     verts=vertices,
                     faces=faces_uvs,
                     textures=textures
                 )
 
-                # Create a black texture for the ground plane
-                img_ground = torch.zeros((512, 512, 3), device=device).float()  # A 512x512 black image
-                # Define UV coordinates for the ground plane vertices
-                v_uv_ground = torch.tensor([[0, 0], [0, 1], [1, 1], [1, 0]], device=device).float()  # Simple UV square
-                ground_texture = TexturesUV(maps=img_ground.unsqueeze(0).repeat(batch, 1, 1, 1),
-                                            faces_uvs=ground_faces.unsqueeze(0).repeat(batch, 1, 1),
-                                            verts_uvs=v_uv_ground.unsqueeze(0).repeat(batch, 1, 1))
-
-                ground_mesh = Meshes(verts=ground_vertices,
-                                     faces=ground_faces.unsqueeze(0).repeat(batch, 1, 1),
-                                     textures=ground_texture)
-
-
                 start_time = time.time()
                 renderer = renderer.to(device)
-                images = renderer(smpl_mesh)
+                rendered_image = renderer(smpl_meshes).cpu().numpy()[..., 0:3]
 
+                floor_image_path = "scripts/render/floor.jpg"  # Replace with the path to your floor image
+                floor_image = cv2.imread(floor_image_path)
+                floor_image = cv2.cvtColor(floor_image, cv2.COLOR_BGR2RGB)  # Convert to RGB format for compatibility
+
+                # Resize the floor image to match the rendered image dimensions
+                rendered_image_height, rendered_image_width = rendered_image.shape[1:3]
+                floor_image_resized = cv2.resize(floor_image, (rendered_image_width, rendered_image_height))/255
+
+                # Step 3: Overlay the rendered image on the floor image
+                # If your rendered image has a black or other color background, you may want to create a mask
+                # Here we assume that the rendered image has a black background, so we create a mask for non-black pixels
+
+                mask = np.all(rendered_image<1, axis=-1)
+
+
+                # Combine the images using the mask
+                floor_image_expanded = np.expand_dims(floor_image_resized, axis=0)  # Shape: (1, H, W, C)
+
+                # Repeat the image along the batch dimension
+                combined_image = np.repeat(floor_image_expanded, batch, axis=0)  # Shape: (batch, H, W, C)
+
+                combined_image[mask] = rendered_image[mask]
                 end_time = time.time()
                 render_time = end_time - start_time
 
-                print("render time is  ", render_time)
+                print("render time is ", render_time)
                 plt.figure(dpi=250)
-                plt.imshow(images[self.num_envs-1, ..., :3].cpu().numpy())
+                plt.imshow(combined_image[self.num_envs-1])
                 plt.grid("off");
                 plt.axis("off")
                 plt.show()
-                return images
+                return combined_image
         return
     def compute_vqascore_reward(self, curr_images, text_command):
 
