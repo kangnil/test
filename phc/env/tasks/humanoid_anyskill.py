@@ -22,9 +22,10 @@ from scipy.spatial.transform import Rotation as sRot
 from phc.utils.flags import flags
 import open_clip
 from PIL import Image
+
 from src.t2v_metrics import t2v_metrics
 from pytorch3d.io import load_objs_as_meshes
-from pytorch3d.structures import Meshes, join_meshes_as_scene
+from pytorch3d.structures import Meshes, join_meshes_as_batch
 from pytorch3d.renderer import TexturesUV,TexturesVertex
 from pytorch3d.transforms import Rotate, Translate
 from pytorch3d.transforms import euler_angles_to_matrix
@@ -268,7 +269,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         return
     def render_opengl_images(self):
 
-        device = torch.device('cuda', index=1) if torch.cuda.is_available() else torch.device('cpu')
+        device = self.device
 
         # Initialize an OpenGL perspective camera.
         # With world coordinates +Y up, +X left and +Z in, the front of the cow is facing the -Z direction.
@@ -318,7 +319,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         #############################################
         if self.opengl_render:
             if self.humanoid_type in ["smpl", "smplh", "smplx"]:
-                assert (self._rigid_body_rot.shape[0] == 1)
+
                 if self._has_upright_start:
                     self.pre_rot = sRot.from_quat([0.5, 0.5, 0.5, 0.5])
                     from smpl_sim.smpllib.smpl_joint_names import SMPL_BONE_ORDER_NAMES, SMPLX_BONE_ORDER_NAMES, \
@@ -340,16 +341,18 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                         root_trans = torch.cat([root_trans, ref_root_trans])
 
                     N = body_quat.shape[0]
-                    offset = self.skeleton_trees[0].local_translation[0].cuda()
-                    root_trans_offset = root_trans - offset
+                    offset = torch.zeros_like(root_trans)
+                    for i in range(N):
+                        offset[i] = self.skeleton_trees[i].local_translation[0]
+                    root_trans_offset = root_trans - offset.to(device)
 
-                    pose_quat = (sRot.from_quat(body_quat.reshape(-1, 4).numpy()) * self.pre_rot).as_quat().reshape(N,
-                                                                                                                    -1,
-                                                                                                                    4)
-                    new_sk_state = SkeletonState.from_rotation_and_root_translation(self.skeleton_trees[0],
-                                                                                    torch.from_numpy(pose_quat),
-                                                                                    root_trans.cpu(), is_local=False)
-                    local_rot = new_sk_state.local_rotation
+                    pose_quat = (sRot.from_quat(body_quat.reshape(-1, 4).numpy()) * self.pre_rot).as_quat().reshape(N,  -1,  4)
+                    local_rot = torch.zeros_like(body_quat)
+                    for i in range(N):
+                        new_sk_state = SkeletonState.from_rotation_and_root_translation(self.skeleton_trees[i],
+                                                                                    torch.from_numpy(pose_quat[i:i+1]),
+                                                                                    root_trans[i:i+1].cpu(), is_local=False)
+                        local_rot[i] = new_sk_state.local_rotation
                     pose_aa = sRot.from_quat(local_rot.reshape(-1, 4).numpy()).as_rotvec().reshape(N, -1, 3)
                     pose_aa = torch.from_numpy(pose_aa[:, self.mujoco_2_smpl, :].reshape(N, -1)).cuda()
                 else:
@@ -432,17 +435,10 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                                      faces=ground_faces.unsqueeze(0).repeat(batch, 1, 1),
                                      textures=ground_texture)
 
-                # Combine the meshes
-                # Separate SMPL and ground plane meshes
-                smpl_mesh = smpl_mesh.extend(len(ground_mesh))
-                ground_mesh = ground_mesh.extend(len(smpl_mesh))
-
-                # Combine the meshes
-                combined_mesh = join_meshes_as_scene([smpl_mesh, ground_mesh])
 
                 start_time = time.time()
                 renderer = renderer.to(device)
-                images = renderer(combined_mesh)
+                images = renderer(smpl_mesh)
 
                 end_time = time.time()
                 render_time = end_time - start_time
