@@ -28,7 +28,7 @@ from pytorch3d.io import load_objs_as_meshes
 from pytorch3d.structures import Meshes, join_meshes_as_batch
 from pytorch3d.renderer import TexturesUV,TexturesVertex
 from pytorch3d.transforms import Rotate, Translate
-from pytorch3d.transforms import euler_angles_to_matrix
+from pytorch3d.transforms import euler_angles_to_matrix,so3_exp_map,quaternion_to_matrix
 # Data structures and functions for rendering
 from pytorch3d.renderer import (
     look_at_view_transform,
@@ -267,6 +267,9 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         #     self._hack_output_motion_target()
 
         return
+
+
+
     def render_opengl_images(self):
 
         device = self.device
@@ -276,13 +279,18 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         # So we move the camera by 180 in the azimuth direction so it is facing the front of the cow.
         # Example: Create a custom rotation (e.g., rotate around X axis by 45 degrees)
         # Define rotation angles for each axis in radians (e.g., rotate 45 degrees around X-axis)
-        angles = torch.tensor([90, -90, 0], dtype=torch.float32) * (3.14159265 / 180.0)  # Convert degrees to radians
+        #angles = torch.tensor([90, -90, 0], dtype=torch.float32) * (3.14159265 / 180.0)  # Convert degrees to radians
 
         # Create rotation matrix from Euler angles
-        R = euler_angles_to_matrix(angles, "XYZ").unsqueeze(0)  # Shape (1, 3, 3)
-
+        #R = euler_angles_to_matrix(angles, "XYZ").unsqueeze(0)  # Shape (1, 3, 3)
+        R = torch.tensor([[[0,    0,   -1.0],
+                           [-1.0, 0,   0],
+                           [0,    1.0, 0]]])
         # Define translation for the camera
-        T = torch.tensor([[0, -1, 2]], dtype=torch.float32)  # Shape (1, 3)
+        root_trans = self._rigid_body_pos[self.num_envs-1, 0, :].cpu()
+        T = torch.tensor([[0, 0, 2]], dtype=torch.float32)    # Shape (1, 3)
+        R_root_trans = torch.matmul(torch.inverse(R), root_trans)
+        T-=R_root_trans
         cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T)
 
         # Define the settings for rasterization and shading. Here we set the output image to be of size
@@ -356,25 +364,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                     pose_aa = sRot.from_quat(local_rot.reshape(-1, 4).numpy()).as_rotvec().reshape(N, -1, 3)
                     pose_aa = torch.from_numpy(pose_aa[:, self.mujoco_2_smpl, :].reshape(N, -1)).cuda()
                 else:
-                    dof_pos = self._dof_pos
-                    root_trans = self._rigid_body_pos[:, 0, :]
-                    root_rot = self._rigid_body_rot[:, 0, :]
-                    pose_aa = torch.cat([torch_utils.quat_to_exp_map(root_rot), dof_pos], dim=1).reshape(1, -1)
-
-                    if self.vis_ref and len(self.ref_motion_cache['dof_pos']) == self.num_envs:
-                        ref_dof_pos = self.ref_motion_cache['dof_pos']
-                        ref_root_rot = self.ref_motion_cache['rb_rot'][:, 0, :]
-                        ref_root_trans = self.ref_motion_cache['root_pos']
-
-                        ref_pose_aa = torch.cat([torch_utils.quat_to_exp_map(ref_root_rot), ref_dof_pos], dim=1)
-
-                        pose_aa = torch.cat([pose_aa, ref_pose_aa])
-                        root_trans = torch.cat([root_trans, ref_root_trans])
-                    N = pose_aa.shape[0]
-                    offset = self.skeleton_trees[0].local_translation[0].cuda()
-                    root_trans_offset = root_trans - offset
-                    pose_aa = pose_aa.view(N, -1, 3)[:, self.mujoco_2_smpl, :]
-
+                    print("not implemented")
                 with torch.no_grad():
                     vertices, joints = self.mesh_parser.get_joints_verts(pose=pose_aa, th_trans=root_trans_offset.cuda())
 
