@@ -71,7 +71,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
         self.llm_model_batchsize = cfg["env"].get("llm_model_batchsize", 32)
         self.text_command = cfg["env"].get("text_command", "a person is running")
         self.opengl_render = cfg["env"].get("opengl_render", False)
-
+        self.SAVE_OPENGL_RENDER = True
 
         rendering_out = os.path.join("output", "renderings", self.text_command, self.llm_model)
         os.makedirs(rendering_out, exist_ok=True)
@@ -420,11 +420,11 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                 render_time = end_time - start_time
 
                 print("render time is ", render_time)
-                plt.figure(dpi=250)
-                plt.imshow(combined_image[1])
-                plt.grid("off");
-                plt.axis("off")
-                plt.show()
+                # plt.figure(dpi=250)
+                # plt.imshow(combined_image[self.num_envs//2])
+                # plt.grid("off");
+                # plt.axis("off")
+                # plt.show()
                 return combined_image
         return
     def compute_vqascore_reward(self, curr_images, text_command):
@@ -475,7 +475,7 @@ class HumanoidAnyskillZ(HumanoidAnyskill):
         return
     
     def step(self, actions):
-        if self.SAVE_RENDER or self.SAVE_O3D_RENDER:
+        if self.SAVE_RENDER or self.SAVE_O3D_RENDER or self.SAVE_OPENGL_RENDER:
             curr_motion_key = self._motion_lib.curr_motion_keys[0]
             curr_motion_id = self._motion_lib._curr_motion_ids[0].item()
             curr_motion = str(curr_motion_id) + "-" + curr_motion_key #+ "-" + datetime.now().strftime( '%Y-%m-%d-%H:%M:%S')
