@@ -283,19 +283,17 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
 
         # Create rotation matrix from Euler angles
         #R = euler_angles_to_matrix(angles, "XYZ").unsqueeze(0)  # Shape (1, 3, 3)
-        R = torch.tensor([[[0,    0,   -1.0],
+        R = torch.tensor([[0,    0,   -1.0],
                            [-1.0, 0,   0],
-                           [0,    1.0, 0]]])
+                           [0,    1.0, 0]])
+        R_inv =  torch.inverse(R).unsqueeze(0).repeat(self.num_envs, 1,1)
         # Define translation for the camera
-        root_trans = self._rigid_body_pos[self.num_envs-1, 0, :].cpu()
-        T = torch.tensor([[0, 0, 2]], dtype=torch.float32)    # Shape (1, 3)
-        R_root_trans = torch.matmul(torch.inverse(R), root_trans)
+        root_trans = self._rigid_body_pos[:, 0, :].cpu().unsqueeze(2)
+        T = torch.tensor([[0, 0, 2]], dtype=torch.float32).repeat(self.num_envs, 1)    # Shape (1, 3)
+        R_root_trans = torch.matmul(R_inv, root_trans).squeeze(-1)
         T-=R_root_trans
-        cameras = OpenGLPerspectiveCameras(device=device, R=R, T=T)
+        cameras = OpenGLPerspectiveCameras(device=device, R=R.unsqueeze(0).repeat(self.num_envs, 1,1), T=T)
 
-        # Define the settings for rasterization and shading. Here we set the output image to be of size
-        # 512x512. As we are rendering images for visualization purposes only we will set faces_per_pixel=1
-        # and blur_radius=0.0. Refer to rasterize_meshes.py for explanations of these parameters.
         raster_settings = RasterizationSettings(
             image_size=512,
             blur_radius=0.0,
@@ -365,6 +363,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
                     pose_aa = torch.from_numpy(pose_aa[:, self.mujoco_2_smpl, :].reshape(N, -1)).cuda()
                 else:
                     print("not implemented")
+
                 with torch.no_grad():
                     vertices, joints = self.mesh_parser.get_joints_verts(pose=pose_aa, th_trans=root_trans_offset.cuda())
 
@@ -422,7 +421,7 @@ class HumanoidAnyskill(humanoid_amp_task.HumanoidAMPTask):
 
                 print("render time is ", render_time)
                 plt.figure(dpi=250)
-                plt.imshow(combined_image[self.num_envs-1])
+                plt.imshow(combined_image[1])
                 plt.grid("off");
                 plt.axis("off")
                 plt.show()
